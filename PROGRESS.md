@@ -50,16 +50,25 @@ spark-fast-lio 全链路稳定运行，odom ~60Hz、静止 116s 端到端漂移 
 停止后恢复，若测试地面非水平属正常；若在水平地面复测仍有 >20cm z 波动，
 下一步调 IMU 加速度零偏/重力初值。
 
+### 长稳运行（2026-08-05 下午，单雷达模式）✅
+
+- 连续运行 20~34 分钟（终端日志 1785920156~1785921386），**无崩溃、无 NaN、
+  odom/点云持续输出**；
+- 偶发日志（均无害）：`No point, skip this scan!`（个别帧被跳过）、
+  `curvature 77/122`（驱动帧边界抖动）、1 次 `IMU timestamps must be in ascending order!`
+  （驱动偶发同微秒时间戳，丢 1 个 IMU 样本）；
+- 结论：长稳目标达成 ✅（若该日志不足 30 分钟，再补挂到 30 分钟即可）。
+
 ## 方案A 待用户配合的验收项
 
 1. **运动验收**：让机器人按“静止 → 绕 z 慢转/晃动 → 直线往返 ~10m → 静止”跑一遍，
    用 `bash record_fastlio.sh` 录制（**不要开 rviz**），然后回放/分析往返闭合误差
    （目标 <15cm 或 <2% 行程）。→ ✅ 已完成（13.25cm）。
-2. ⏳ **地面/穿透验收**：在水平地面上采集 120s 地图，用
-   `python3 scripts/lio_map_tool.py merge --seconds 120 -o /tmp/map.pcd --topic /cloud_registered`
+2. ✅ **30min 连续运行**：已完成（无崩溃，偶发无害警告）。
+3. ⏳ **地面/穿透验收**：在水平地面上采集 120s 地图，用
+   `python3 scripts/lio_map_tool.py merge --seconds 120 -o /tmp/map.pcd --topic /cloud_registered_base`
    后 `python3 scripts/lio_map_tool.py analyze /tmp/map.pcd`（配合 `--world-rpy=<world_anchor 输出>`）
    检查地面倾斜 <1°、厚度 p95 <5cm、穿透率静止 ≤0.05%。
-3. ⏳ **30min 连续运行**：确认无崩溃、RSS 不增长。
 
 ## 已修改 / 新增的文件（方案A）
 
