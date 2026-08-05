@@ -1,0 +1,71 @@
+common:
+  msg_source: 1                         # 0: not use Lidar
+                                        # 1: packet message comes from online Lidar
+                                        # 2: packet message comes from ROS or ROS2
+                                        # 3: packet message comes from Pcap file
+  send_packet_ros: false                # true: Send packets through ROS or ROS2(Used to record packet)
+  send_point_cloud_ros: true            # true: Send point cloud through ROS or ROS2
+lidar:
+  - driver:
+      lidar_type: RSAIRY                # Airy LiDAR
+      msop_port: 6699                   # Msop port of lidar
+      difop_port: 7788                  # Difop port of lidar
+      imu_port: 6688                    # IMU port of lidar (Airy supports IMU)
+      user_layer_bytes: 0               # Bytes of user layer. No user layer if it is 0
+      tail_layer_bytes: 0               # Bytes of tail layer. No tail layer if it is 0
+
+      min_distance: 0.15                # Minimum distance of point cloud (Airy blind zone: 0.1m)
+      max_distance: 60                  # Maximum distance of point cloud (Airy spec: 60m)
+      use_lidar_clock: false             # true--Use the lidar clock as the message timestamp
+                                        # false-- Use the system clock as the timestamp
+      dense_points: false               # true: discard NAN points; false: reserve NAN points
+
+      ts_first_point: true              # true: time-stamp point cloud with the first point; false: with the last point;
+
+      start_angle: 0                    # Start angle of point cloud
+      end_angle: 360                    # End angle of point cloud
+
+                                        # When msg_source is 3, the following parameters will be used
+      pcap_repeat: true                 # true: The pcap bag will repeat play
+      pcap_rate: 1.0                    # Rate to read the pcap file
+      pcap_path: /home/robosense/lidar.pcap #The path of pcap file
+
+    ros:
+      ros_frame_id: rslidar_1                           # Frame id of packet message and point cloud message(LiDAR1)
+      ros_recv_packet_topic: /rslidar_packets_1          # Topic used to receive lidar packets from ROS
+      ros_send_packet_topic: /rslidar_packets_1          # Topic used to send lidar packets through ROS
+      ros_send_imu_data_topic: /rslidar_imu_data_1       # Topic used to send imu data through ROS
+      ros_send_point_cloud_topic: /rslidar_points_1      # Topic used to send point cloud through ROS
+      ros_queue_length: 100                               # Topic QoS history depth
+
+  - driver:
+      lidar_type: RSAIRY                # Airy LiDAR
+      msop_port: 6698                   # Msop port of lidar (不同于雷达1)
+      difop_port: 7789                  # Difop port of lidar (不同于雷达1)
+      imu_port: 6689                    # IMU port of lidar (不同于雷达1)
+      user_layer_bytes: 0               # Bytes of user layer. No user layer if it is 0
+      tail_layer_bytes: 0               # Bytes of tail layer. No tail layer if it is 0
+
+      min_distance: 0.15                # Minimum distance of point cloud (Airy blind zone: 0.1m)
+      max_distance: 60                  # Maximum distance of point cloud (Airy spec: 60m)
+      use_lidar_clock: false             # true--Use the lidar clock as the message timestamp
+                                        # false-- Use the system clock as the timestamp
+      dense_points: false               # true: discard NAN points; false: reserve NAN points
+
+      ts_first_point: true              # true: time-stamp point cloud with the first point; false: with the last point;
+
+      start_angle: 0                    # Start angle of point cloud
+      end_angle: 360                    # End angle of point cloud
+
+                                        # When msg_source is 3, the following parameters will be used
+      pcap_repeat: true                 # true: The pcap bag will repeat play
+      pcap_rate: 1.0                    # Rate to read the pcap file
+      pcap_path: /home/robosense/lidar.pcap #The path of pcap file
+
+    ros:
+      ros_frame_id: rslidar_2                           # Frame id of packet message and point cloud message(LiDAR2)
+      ros_recv_packet_topic: /rslidar_packets_2          # Topic used to receive lidar packets from ROS
+      ros_send_packet_topic: /rslidar_packets_2          # Topic used to send lidar packets through ROS
+      ros_send_imu_data_topic: /rslidar_imu_data_2       # Topic used to send imu data through ROS
+      ros_send_point_cloud_topic: /rslidar_points_2      # Topic used to send point cloud through ROS
+      ros_queue_length: 100                               # Topic QoS history depth
