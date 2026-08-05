@@ -1,0 +1,65 @@
+/**:
+  ros__parameters:
+    common:
+      map_frame: "odom"
+      lidar_frame: "rslidar_1"
+      base_frame: "base_link"
+      imu_frame: "rslidar_1"
+      visualization_frame: "base"
+      time_sync_en: false
+      save_dir: "/home/wz/lidar_0804/bags/maps"
+      sequence_name: "fastlio_airy"
+
+    preprocess:
+      lidar_type: 2                # 2: Velodyne-style PointCloud2 handler
+      scan_line: 96
+      scan_rate: 10
+      timestamp_unit: 0            # adapter outputs relative seconds
+      blind: 0.3
+      blind_for_human_pilots: 0.0  # disable the "human pilot zone" rejection
+
+    mapping:
+      acc_cov: 0.1
+      gyr_cov: 0.1
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      fov_degree: 360.0
+      det_range: 60.0
+      extrinsic_est_en: false      # set true via launch arg during calibration
+      extrinsic_T: [0.0, 0.0, 0.0]
+      # R_lidar2imu = R(imu2lidar DIFOP quaternion)^T
+      extrinsic_R: [-0.016767, -0.999803, 0.01064,
+                    -0.999857, 0.016745, -0.002218,
+                    0.002039, -0.010676, -0.999941]
+
+    filter_size_map: 0.2
+    point_filter_num: 4
+    point_filter_num_for_preprocessing: 2   # 降低 CPU/带宽 (74k -> ~37k 点/帧)
+    max_iteration: 4
+    cube_side_length: 500.0
+
+    publish:
+      path_en: true
+      scan_publish_en: true
+      # 录制/运动时建议 false (省 CPU/带宽, 避免雷达丢包);
+      # 需要高质量地图时再改 true
+      dense_publish_en: false
+      scan_lidarframe_pub_en: false
+      scan_bodyframe_pub_en: true
+      scan_baseframe_pub_en: true
+
+    pcd_save:
+      pcd_save_en: false
+      interval: 100               # 每 100 帧写一个 PCD (约 15s); 由 launch save_map:=true 开启
+
+    gravity_alignment:
+      # 默认关闭: 静止启动时 odom 立即可用（地图=初始 base_link 系, 水平地面 z 轴垂直）。
+      # 若机器人初始姿态明显倾斜, 设 true 并让机器人运动数秒完成对齐。
+      enable_gravity_alignment: false
+      acc_diff_thr: 0.2
+      num_moving_frames_thr: 20
+      num_gravity_measurements_thr: 20
+      g_base: [0.0, 0.0, -1.0]
+
+    verbose: false
+    runtime_pos_log_enable: false

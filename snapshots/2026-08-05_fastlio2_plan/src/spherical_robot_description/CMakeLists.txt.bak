@@ -36,7 +36,6 @@ install(PROGRAMS
   scripts/point_cloud_fusion_py.py
   scripts/suspension_compensator.py
   scripts/deskew_node.py
-  scripts/world_anchor.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

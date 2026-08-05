@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""
+悬挂补偿节点 (Suspension Compensator) v2
+=========================================
+利用 LiDAR 内置 IMU 追踪两侧悬挂模块的实时姿态，
+动态发布修正后的 base_link → rslidar_i TF。
+
+v2 改进:
+  - 在线陀螺零偏估计 (慢速 EMA)，静止时自动收敛
+  - 偏置扣除后积分，彻底消除漂移
+  - IMU→LiDAR 坐标系旋转 (DIFOP 出厂外参)
+  - 静止检测 + 平滑归零
+
+订阅:
+  /rslidar_imu_data_1  (200Hz)
+  /rslidar_imu_data_2  (200Hz)
+
+发布:
+  /tf  (base_link → rslidar_1, base_link → rslidar_2)
+"""
+
+import math
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Imu
+from geometry_msgs.msg import TransformStamped
+from tf2_ros import TransformBroadcaster
+
+
+# ── 可调参数 ──
+BIAS_ALPHA     = 0.0005    # 陀螺零偏 EMA 系数 (~10s 收敛)
+REST_THRESHOLD = 0.015     # rad/s, 偏置扣除后的静止阈值
+MOTION_THRESH  = 0.05      # rad/s, 偏置扣除后的运动检测阈值
+REST_DURATION  = 0.5       # 秒, 连续静止时长触发归零
+RESET_SPEED    = 5.0       # lerp 速率 (5.0 = ~1s 收敛)
+
+# ── URDF 标称值 (v9) ──
+URDF = {
+    'rslidar_1': {'x': 0.0, 'y': 0.007, 'z': 0.020,
+                  'roll': 1.731, 'pitch': 3.22, 'yaw': 0.02},
+    'rslidar_2': {'x': -0.05, 'y': -0.137, 'z': 0.020,
+                  'roll': -1.621, 'pitch': 0.06, 'yaw': 0.02},
+}
+
+# ── IMU→LiDAR 外参 (Airy DIFOP 出厂标定) ──
+# q ≈ [-0.70, 0.71, 0, 0] → ~180° 旋转 (IMU 芯片倒装)
+IMU_TO_LIDAR_Q = {
+    'rslidar_1': [-0.701147, 0.712996, -0.00452085, -0.00301585],
+    'rslidar_2': [-0.704169, 0.710025, -0.00325387, -0.00063305],
+}
+
+ID_QUAT = [0.0, 0.0, 0.0, 1.0]
+
+
+# ── 四元数工具函数 ────────────────────────────────────
+def euler_to_quat(roll, pitch, yaw):
+    cr, sr = math.cos(roll/2), math.sin(roll/2)
+    cp, sp = math.cos(pitch/2), math.sin(pitch/2)
+    cy, sy = math.cos(yaw/2), math.sin(yaw/2)
+    return [
+        sr*cp*cy - cr*sp*sy,
+        cr*sp*cy + sr*cp*sy,
+        cr*cp*sy - sr*sp*cy,
+        cr*cp*cy + sr*sp*sy,
+    ]
+
+def quat_multiply(q1, q2):
+    x1, y1, z1, w1 = q1
+    x2, y2, z2, w2 = q2
+    return [
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2,
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+    ]
+
+def quat_lerp(q_from, q_to, t):
+    x = q_from[0] + (q_to[0] - q_from[0]) * t
+    y = q_from[1] + (q_to[1] - q_from[1]) * t
+    z = q_from[2] + (q_to[2] - q_from[2]) * t
+    w = q_from[3] + (q_to[3] - q_from[3]) * t
+    n = math.sqrt(x*x + y*y + z*z + w*w)
+    return [x/n, y/n, z/n, w/n]
+
+def rotate_vector_by_quat(v, q):
+    """v' = q × v × q⁻¹  (将 IMU 帧向量转到 LiDAR 帧)"""
+    qx, qy, qz, qw = q
+    # t = q * v  (v 视为纯四元数)
+    tx =  qw*v[0] + qy*v[2] - qz*v[1]
+    ty =  qw*v[1] + qz*v[0] - qx*v[2]
+    tz =  qw*v[2] + qx*v[1] - qy*v[0]
+    tw = -qx*v[0] - qy*v[1] - qz*v[2]
+    # result = t * q_conj
+    return [
+        tx*qw - ty*(-qz) + tz*(-qy) + tw*(-qx),
+        ty*qw - tz*(-qx) + tx*(-qz) + tw*(-qy),
+        tz*qw - tx*(-qy) + ty*(-qx) + tw*(-qz),
+    ]
+
+def quat_angle(q):
+    """四元数偏离单位旋转的角度 (rad)"""
+    # angle = 2 * arccos(|qw|), 但对于小角度: ≈ 2 * sqrt(qx²+qy²+qz²)
+    s = math.sqrt(q[0]**2 + q[1]**2 + q[2]**2)
+    if s > 1e-9:
+        return 2 * math.atan2(s, abs(q[3]))
+    return 0.0
+
+
+# ── 主节点 ────────────────────────────────────────────
+class SuspensionCompensator(Node):
+    def __init__(self):
+        super().__init__('suspension_compensator')
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+        self.state = {}
+        for lid in ('rslidar_1', 'rslidar_2'):
+            s = URDF[lid]
+            self.state[lid] = {
+                'tx': s['x'], 'ty': s['y'], 'tz': s['z'],
+                'q_nominal': euler_to_quat(s['roll'], s['pitch'], s['yaw']),
+                'last_t': None,
+                'q_accum': ID_QUAT[:],
+                # ── 陀螺零偏估计 ──
+                'bias_wx': 0.0, 'bias_wy': 0.0, 'bias_wz': 0.0,
+                # ── 静止检测 ──
+                'rest_t': 0.0,
+                'is_resting': True,
+                'motion_led': False,   # 是否正在运动中
+            }
+
+        self.create_subscription(Imu, '/rslidar_imu_data_1',
+                                  lambda m: self._cb(m, 'rslidar_1'), 50)
+        self.create_subscription(Imu, '/rslidar_imu_data_2',
+                                  lambda m: self._cb(m, 'rslidar_2'), 50)
+
+        self._tf_timer = self.create_timer(0.01, self._publish)
+        self._log_timer = self.create_timer(2.0, self._log_status)
+        self.get_logger().info('Suspension compensator v2 ready')
+
+    # ── IMU 回调 ──────────────────────────────────────
+    def _cb(self, msg: Imu, lid: str):
+        st = self.state[lid]
+
+        # 1. IMU 帧 → LiDAR 帧旋转
+        wx, wy, wz = rotate_vector_by_quat(
+            [msg.angular_velocity.x,
+             msg.angular_velocity.y,
+             msg.angular_velocity.z],
+            IMU_TO_LIDAR_Q[lid])
+
+        raw_mag = math.sqrt(wx*wx + wy*wy + wz*wz)
+
+        # 2. 在线零偏估计 — 持续慢速 EMA (不受运动影响, 长时间平均自然归零)
+        st['bias_wx'] += BIAS_ALPHA * (wx - st['bias_wx'])
+        st['bias_wy'] += BIAS_ALPHA * (wy - st['bias_wy'])
+        st['bias_wz'] += BIAS_ALPHA * (wz - st['bias_wz'])
+
+        # 3. 偏置扣除 → 得到真实角速度
+        wx_c = wx - st['bias_wx']
+        wy_c = wy - st['bias_wy']
+        wz_c = wz - st['bias_wz']
+        av_mag = math.sqrt(wx_c*wx_c + wy_c*wy_c + wz_c*wz_c)
+
+        # 4. dt
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        dt = t - st['last_t'] if st['last_t'] else 0.005
+        if dt <= 0 or dt > 0.1:
+            dt = 0.005
+        st['last_t'] = t
+
+        # 5. 角速度积分 → q_accum (只用偏置扣除后的 ω)
+        angle = av_mag * dt
+        if angle > 1e-9:
+            half = angle / 2.0
+            s = math.sin(half) / av_mag
+            dq = [s*wx_c, s*wy_c, s*wz_c, math.cos(half)]
+        else:
+            dq = ID_QUAT[:]
+        st['q_accum'] = quat_multiply(st['q_accum'], dq)
+
+        # 6. 静止/运动检测 (基于偏置扣除后的 ω)
+        if av_mag < REST_THRESHOLD:
+            st['rest_t'] += dt
+            if st['rest_t'] >= REST_DURATION and not st['is_resting']:
+                st['is_resting'] = True
+                dev_deg = quat_angle(st['q_accum']) * 180 / math.pi
+                if dev_deg > 1.0:  # 只在大偏差时打印
+                    self.get_logger().info(
+                        f'{lid}: Rest {st["rest_t"]:.1f}s, '
+                        f'drift={dev_deg:.1f}°, resetting...')
+        else:
+            if st['is_resting'] and av_mag > MOTION_THRESH:
+                self.get_logger().info(
+                    f'{lid}: Motion |ω|={av_mag:.3f} rad/s '
+                    f'(raw={raw_mag:.3f}, bias='
+                    f'[{st["bias_wx"]:.4f},{st["bias_wy"]:.4f},{st["bias_wz"]:.4f}])')
+            st['rest_t'] = 0.0
+            st['is_resting'] = False
+
+    # ── 定时发布 TF ────────────────────────────────────
+    def _publish(self):
+        now = self.get_clock().now().to_msg()
+        for lid in ('rslidar_1', 'rslidar_2'):
+            st = self.state[lid]
+
+            # 静止归零: lerp q_accum → identity
+            if st['is_resting']:
+                dev = quat_angle(st['q_accum'])
+                if dev > 1e-6:
+                    t = RESET_SPEED / 100.0  # ~100Hz timer
+                    st['q_accum'] = quat_lerp(st['q_accum'], ID_QUAT, min(t, 1.0))
+
+            # 动态旋转 = URDF × IMU补偿
+            q = quat_multiply(st['q_nominal'], st['q_accum'])
+
+            tf = TransformStamped()
+            tf.header.stamp = now
+            tf.header.frame_id = 'base_link'
+            tf.child_frame_id = lid
+            tf.transform.translation.x = st['tx']
+            tf.transform.translation.y = st['ty']
+            tf.transform.translation.z = st['tz']
+            tf.transform.rotation.x = q[0]
+            tf.transform.rotation.y = q[1]
+            tf.transform.rotation.z = q[2]
+            tf.transform.rotation.w = q[3]
+            self.tf_broadcaster.sendTransform(tf)
+
+    # ── 状态日志 ────────────────────────────────────────
+    def _log_status(self):
+        for lid in ('rslidar_1', 'rslidar_2'):
+            st = self.state[lid]
+            bias_mag = math.sqrt(
+                st['bias_wx']**2 + st['bias_wy']**2 + st['bias_wz']**2)
+            dev_deg = quat_angle(st['q_accum']) * 180 / math.pi
+            state_str = 'REST' if st['is_resting'] else 'MOTION'
+            self.get_logger().info(
+                f'{lid}: [{state_str}] bias|ω|={bias_mag:.4f} '
+                f'drift={dev_deg:.1f}° rest_t={st["rest_t"]:.1f}s',
+                throttle_duration_sec=5)
+
+
+def main():
+    rclpy.init()
+    node = SuspensionCompensator()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()

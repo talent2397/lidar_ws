@@ -1,33 +1,18 @@
-# ROS2 build artifacts
+# 构建/安装/日志/数据（不上传）
 build/
 install/
 log/
+bags/
+*.bag
 
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-dist/
+*.pyc
 
-# CMake
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-CTestTestfile.cmake
-Makefile
+# Codex / 本地工具
+.agents/
+.codex/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# ROS bag files (large)
-*.bag
-*.db3
+# 临时文件
+*.log
+*.pcd
