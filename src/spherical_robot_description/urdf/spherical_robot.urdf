@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<robot name="spherical_robot">
+  <link name="base_link">
+    <visual>
+      <geometry><sphere radius="0.345"/></geometry>
+      <material name="body"><color rgba="0.3 0.3 0.3 0.3"/></material>
+    </visual>
+  </link>
+  <joint name="left_lidar_mount" type="fixed">
+    <parent link="base_link"/>
+    <child link="rslidar_1"/>
+    <origin xyz="0.0 0.007 0.0693" rpy="-1.5946 0.0033 -3.1147"/>
+  </joint>
+  <link name="rslidar_1">
+    <visual>
+      <geometry><cylinder radius="0.03" length="0.063"/></geometry>
+      <material name="c1"><color rgba="1.0 0.2 0.2 0.8"/></material>
+    </visual>
+  </link>
+  <joint name="right_lidar_mount" type="fixed">
+    <parent link="base_link"/>
+    <child link="rslidar_2"/>
+    <origin xyz="-0.05 -0.137 0.1032" rpy="-1.4142 -0.0231 0.0238"/>
+  </joint>
+  <link name="rslidar_2">
+    <visual>
+      <geometry><cylinder radius="0.03" length="0.063"/></geometry>
+      <material name="c2"><color rgba="0.2 0.2 1.0 0.8"/></material>
+    </visual>
+  </link>
+</robot>
