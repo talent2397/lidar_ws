@@ -120,6 +120,20 @@ spark-fast-lio 全链路稳定运行，odom ~60Hz、静止 116s 端到端漂移 
 - 结论：双雷达外参**不需要改**，ICP 重叠法不适用于互补覆盖；
   叠加验证以**拼接完整性**为准（RViz 目视：两片点云合成完整场景、无整体旋转/镜像）。
 
+### 旧代码 vs 新代码 实机对比（2026-08-10 晚）
+
+- 旧栈（`/home/wz/lidar_存档`，XYZI + 旧融合）实时采集：
+  `lidar1→world` z 中位 0.39m、`lidar2→world` z 中位 1.14m、重叠 2.9%
+  （图 `docs/dual_lidar_old.png`）；
+- 新栈（FAST-LIO2 + 转换节点）实时采集：
+  LIO 地图 z 中位 -0.38m（base 系，等价 world ≈0）、`lidar2_map` z 中位 2.46m、
+  重叠 ~0%（图 `docs/dual_lidar_new.png`）；
+- 旧 bag `/merged_points` 直方图核对：地面大团（z≈0）来自 lidar1，
+  lidar2 点群集中在 z≈0.5~1.5m —— 旧融合穿透低是因为 lidar2 地面点少，并非两雷达严格对齐；
+- 真实 `/tf_static` 外参与手算一致，确认变换无方向错误；
+- 结论：**两套代码对双雷达的处理行为一致（互补覆盖）**，外参正确；
+  差异只在输出链路（旧=融合 `/merged_points`，新=LIO 地图 + `/rslidar_points_2_map`）。
+
 下一步（未做）：双雷达点云合并/方案B、2D 栅格建图（slam_toolbox）。
 
 ## 已修改 / 新增的文件（方案A）

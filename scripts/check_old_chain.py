@@ -38,8 +38,9 @@ def read_cloud(msg):
     return np.column_stack([x[g], y[g], z[g]])
 
 
-def apply(pts, R, t):
-    return (R @ pts.T).T + t
+def apply_inv(pts, R, t):
+    """lidar -> base: p_base = R^T (p_lidar - t)"""
+    return ((R.T @ (pts - t).T)).T
 
 
 def main():
@@ -79,8 +80,8 @@ def main():
     t1 = np.array([0.0, 0.007, 0.0693]);  R1 = rot_rpy(-1.5946, 0.0033, -3.1147)
     t2 = np.array([-0.05, -0.137, 0.1032]); R2 = rot_rpy(-1.4142, -0.0231, 0.0238)
     # world = base + z=0.345
-    w1 = apply(got["l1"], R1, t1 + np.array([0, 0, 0.345]))
-    w2 = apply(got["l2"], R2, t2 + np.array([0, 0, 0.345]))
+    w1 = apply_inv(got["l1"], R1, t1) + np.array([0, 0, 0.345])
+    w2 = apply_inv(got["l2"], R2, t2) + np.array([0, 0, 0.345])
     for name, p in (("l1->world", w1), ("l2->world", w2)):
         print(f"{name:10s} n={len(p):6d} "
               f"z[{p[:, 2].min():7.2f},{p[:, 2].max():7.2f}] med={np.median(p[:, 2]):6.2f}")

@@ -102,6 +102,13 @@ def main():
     # 启动瞬间 odom≈base(偏差<2cm), 直接同图绘制足够直观。
     map_o = got["map"]
     l2 = got["l2"]
+    print(f"LIO地图(base系) n={len(map_o)} z[{map_o[:, 2].min():.2f},{map_o[:, 2].max():.2f}] "
+          f"med={np.median(map_o[:, 2]):.2f}")
+    print(f"lidar2_map(odom) n={len(l2)} z[{l2[:, 2].min():.2f},{l2[:, 2].max():.2f}] "
+          f"med={np.median(l2[:, 2]):.2f}")
+    A = set(map(tuple, np.floor(map_o / 0.25).astype(np.int64)))
+    B = set(map(tuple, np.floor(l2 / 0.25).astype(np.int64)))
+    print(f"共同系体素重叠(0.25m): {100*len(A & B)/max(1, len(B)):.1f}% (占lidar2)")
     rng = np.random.default_rng(0)
     if len(map_o) > args.cap:
         map_o = map_o[rng.choice(len(map_o), args.cap, replace=False)]
