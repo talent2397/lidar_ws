@@ -79,6 +79,24 @@ spark-fast-lio 全链路稳定运行，odom ~60Hz、静止 116s 端到端漂移 
 - 启用：`bash start_fastlio.sh dual_lidar:=true`
 - 实测：输出 6-7Hz、点数与输入一致、节点 CPU ~13%
 
+✅ 新增叠加验证与录包工具：
+
+- `scripts/check_cloud_alignment.py`：实机/离线回放下对比
+  `/cloud_registered_base`(→odom)、`/rslidar_points_2_map`、`/rslidar_points_2`(→odom)，
+  输出 0.25m 体素重叠率 + 最近邻距离；
+- `record_dual.sh`：双雷达 + LIO 全话题录包（自动 2GB 分卷），供离线回放验证；
+- `scripts/diag_frames.py`：帧/外参诊断。
+
+### 实测发现（2026-08-10）
+
+- 转换节点自洽 ✅：`/rslidar_points_2_map` 与“原始 lidar2 经 TF 变换”重叠 **92.6%**、
+  最近邻中位 1.9cm —— 转换节点本身正确；
+- 双雷达叠加 ❌：LIO 地图与第二雷达在 odom 系重叠 **0%**、z 朝向相反
+  （lidar1→base z 负、lidar2→base z 正）—— 当前 URDF 的 `base→rslidar_2` 外参与
+  rslidar_1 相差约 180° 朝向，两雷达点云无法直接叠合；
+- 结论：下一步需要**双雷达外参标定**（用两雷达同时刻点云做 ICP 求 lidar2→lidar1
+  的精确 R/t，再更新 URDF/launch），标定完成后叠加验证即可达标。
+
 下一步（未做）：双雷达点云合并/方案B、2D 栅格建图（slam_toolbox）。
 
 ## 已修改 / 新增的文件（方案A）
