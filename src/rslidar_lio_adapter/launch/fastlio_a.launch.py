@@ -32,9 +32,10 @@ def generate_launch_description():
     rviz_arg = DeclareLaunchArgument('rviz', default_value='false')
     driver_arg = DeclareLaunchArgument('use_driver', default_value='true')
     dual_arg = DeclareLaunchArgument(
-        'dual_lidar', default_value='true',
+        'dual_lidar', default_value='false',
         description='true: 驱动解两台雷达(可看 /rslidar_points_2); '
                     'false: LIO 模式只解主雷达(省 CPU 防丢帧)')
+    compat_arg = DeclareLaunchArgument('compat_fusion', default_value='false')
     est_arg = DeclareLaunchArgument(
         'extrinsic_est', default_value='false',
         description='true: 在线估计 IMU-LiDAR 外参; false: 使用配置中的固定外参')
@@ -52,6 +53,7 @@ def generate_launch_description():
         rviz_arg,
         driver_arg,
         dual_arg,
+        compat_arg,
         est_arg,
         save_arg,
         z_arg,
@@ -126,6 +128,15 @@ def generate_launch_description():
             package='tf2_ros', executable='static_transform_publisher',
             arguments=['-0.05', '-0.137', '0.1032', '-1.4142', '-0.0231', '0.0238',
                        'base_link', 'rslidar_2'],
+        ),
+
+        # ⑥ 兼容模式: 旧融合节点 /merged_points (默认关闭)
+        Node(
+            package='spherical_robot_description',
+            executable='point_cloud_fusion',
+            name='point_cloud_fusion',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('compat_fusion')),
         ),
 
         # ⑦ RViz
