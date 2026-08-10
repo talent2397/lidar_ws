@@ -6,6 +6,7 @@
 
 import math
 import subprocess
+import sys
 import time
 
 import numpy as np
@@ -42,6 +43,8 @@ def apply(pts, R, t):
 
 
 def main():
+    bag = sys.argv[1] if len(sys.argv) > 1 else \
+        "/home/wz/lidar_0804/bags/dual_lio_20260810_141546"
     rclpy.init()
     node = Node("old_chain")
     got = {}
@@ -58,7 +61,6 @@ def main():
     node.create_subscription(PointCloud2, "/rslidar_points_2", mk("l2"),
                              qos_profile_sensor_data)
 
-    bag = "/home/wz/lidar_0804/bags/dual_lio_20260810_141546"
     proc = subprocess.Popen(
         ["ros2", "bag", "play", bag,
          "--topics", "/rslidar_points_1", "/rslidar_points_2",
