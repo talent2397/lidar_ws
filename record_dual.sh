@@ -26,5 +26,5 @@ ros2 bag record \
     /path \
     /tf \
     /tf_static \
-    --max-bag-size 2048 \
+    --max-bag-size 2147483648 \
     -o "dual_lio_$(date +%Y%m%d_%H%M%S)"
