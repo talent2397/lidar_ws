@@ -22,14 +22,15 @@ Visualization Manager:
       Style: Points
       Size (Pixels): 2
     - Class: rviz_default_plugins/PointCloud2
-      Name: CloudBody
+      Name: LiDAR1 Raw
+      Enabled: true
       Topic:
-        Value: /cloud_registered_body
+        Value: /rslidar_points_1
       Style: Points
       Size (Pixels): 2
     - Class: rviz_default_plugins/PointCloud2
-      Name: LiDAR2 Points
-      Enabled: false
+      Name: LiDAR2 Raw
+      Enabled: true
       Topic:
         Value: /rslidar_points_2
       Style: Points
