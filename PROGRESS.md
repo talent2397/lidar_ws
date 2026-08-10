@@ -70,6 +70,17 @@ spark-fast-lio 全链路稳定运行，odom ~60Hz、静止 116s 端到端漂移 
    后 `python3 scripts/lio_map_tool.py analyze /tmp/map.pcd`（配合 `--world-rpy=<world_anchor 输出>`）
    检查地面倾斜 <1°、厚度 p95 <5cm、穿透率静止 ≤0.05%。
 
+## 双雷达扩展（2026-08-10）
+
+✅ 新增“第二雷达 → odom 地图系”转换节点：
+
+- 代码：`src/rslidar_lio_adapter/src/rslidar_points_2_map_node.cpp`
+- 话题：`/rslidar_points_2_map`（odom 系，frame_id=odom）
+- 启用：`bash start_fastlio.sh dual_lidar:=true`
+- 实测：输出 6-7Hz、点数与输入一致、节点 CPU ~13%
+
+下一步（未做）：双雷达点云合并/方案B、2D 栅格建图（slam_toolbox）。
+
 ## 已修改 / 新增的文件（方案A）
 
 | 文件 | 说明 |

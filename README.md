@@ -60,6 +60,7 @@ ros2 bag play bags/fastlio_<时间戳> --topics /rslidar_points_1 /rslidar_imu_d
 
 - `/odometry`、`/path`（FAST-LIO 里程计，约 60Hz）
 - `/cloud_registered`（地图/点云，base 系）、`/cloud_registered_body`、`/cloud_registered_base`
+- `/rslidar_points_2_map`（第二雷达原始点云实时变换到 odom 地图系，`dual_lidar:=true` 时启用）
 - TF：`world → odom → base_link → rslidar_1/2`（world→odom 由 world_anchor 按 IMU 初始姿态生成）
 - `src/spark-fast-lio/spark_fast_lio/PCD/scans_*.pcd`（`save_map:=true` 时）
 

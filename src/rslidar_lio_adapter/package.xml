@@ -11,6 +11,8 @@
 
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
 
   <exec_depend>spark_fast_lio</exec_depend>
   <exec_depend>tf2_ros</exec_depend>

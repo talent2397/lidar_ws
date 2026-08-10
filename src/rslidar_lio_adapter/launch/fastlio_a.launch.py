@@ -139,6 +139,22 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('compat_fusion')),
         ),
 
+        # ⑤b 第二雷达 -> odom 地图系 (仅 dual_lidar:=true 时启用)
+        Node(
+            package='rslidar_lio_adapter',
+            executable='rslidar_points_2_map_node',
+            name='rslidar_points_2_map',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('dual_lidar')),
+            parameters=[{
+                'cloud_in': '/rslidar_points_2',
+                'cloud_out': '/rslidar_points_2_map',
+                'target_frame': 'odom',
+                'source_frame': 'rslidar_2',
+                'time_bins': 1,
+            }],
+        ),
+
         # ⑦ RViz
         Node(
             package='rviz2', executable='rviz2',

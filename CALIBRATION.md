@@ -561,3 +561,15 @@ DIFOP 四元数 q(imu→lidar) = (-0.701147, 0.712996, -0.00452085, -0.00301585)
 - ⏳ 30min 连续运行长稳；
 - ⏳ 2D 栅格建图（后续可装 slam_toolbox + pointcloud_to_laserscan）；
 - 可选：运动段 z 波动较大时调 IMU 加速度零偏/重力初值。
+
+### 12.8 第二雷达 → odom 地图系（2026-08-10 新增）
+
+节点：`rslidar_points_2_map_node`（`rslidar_lio_adapter` 包），
+`bash start_fastlio.sh dual_lidar:=true` 时自动启动：
+
+- 输入：`/rslidar_points_2`（rslidar_2 系原始 XYZIRT）
+- 输出：`/rslidar_points_2_map`（odom 地图系，frame_id=odom）
+- 变换：`odom → base_link`（LIO 动态 TF）+ `base_link → rslidar_2`（静态外参），
+  按逐点时间戳做帧内 TF 插值（`time_bins` 参数，默认 1 = 整帧单 TF）；
+- 实测：输出 ~6-7Hz、与输入点数一致、CPU ~13%，转换节点无瓶颈
+  （双雷达解码在桌面负载下偶发突发帧属驱动侧现象）。

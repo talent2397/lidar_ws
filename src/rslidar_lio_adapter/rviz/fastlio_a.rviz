@@ -34,6 +34,13 @@ Visualization Manager:
         Value: /rslidar_points_2
       Style: Points
       Size (Pixels): 2
+    - Class: rviz_default_plugins/PointCloud2
+      Name: LiDAR2 Map
+      Enabled: true
+      Topic:
+        Value: /rslidar_points_2_map
+      Style: Points
+      Size (Pixels): 2
     - Class: rviz_default_plugins/TF
       Name: TF
       Enabled: true
