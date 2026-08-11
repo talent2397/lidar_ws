@@ -191,7 +191,7 @@ def generate_launch_description():
         #     -> /merged_points [odom] + /merged_points_bev [odom, z=0]
         Node(
             package='rslidar_lio_adapter',
-            executable='dual_lidar_fusion_node',
+            executable='run_fusion_watchdog.sh',
             name='dual_lidar_fusion',
             output='screen',
             condition=IfCondition(LaunchConfiguration('dual_lidar')),

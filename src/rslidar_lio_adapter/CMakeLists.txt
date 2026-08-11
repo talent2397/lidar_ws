@@ -63,6 +63,8 @@ install(TARGETS pointcloud_lite_node
 
 install(PROGRAMS scripts/webgl_view_server_node.py
   DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/run_fusion_watchdog.sh
+  DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY scripts/webgl_viewer_static
   DESTINATION share/${PROJECT_NAME})
 

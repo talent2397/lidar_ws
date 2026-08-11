@@ -5,13 +5,13 @@
 
   1. 订阅轻量点云话题 (默认 /merged_points_lite, /merged_points_bev_lite)
   2. 把 PointCloud2 转成紧凑二进制帧 (WPCB: x/y/z/intensity float32)
-  3. WebSocket(8898) 推给浏览器 + HTTP(8899) 提供页面
+  3. 同一端口(默认 8899)提供页面 + WebSocket 推流
   4. 浏览器用 three.js WebGL 渲染, 用调试电脑的 GPU, 不占 Jetson CPU
 
 用法 (一般通过 web_view.launch.py 启动):
   ros2 run rslidar_lio_adapter webgl_view_server_node.py \
     --ros-args -p topics:=/merged_points_lite,/merged_points_bev_lite \
-               -p http_port:=8899 -p ws_port:=8898
+               -p port:=8899
 """
 
 import asyncio
@@ -20,8 +20,6 @@ import json
 import socket
 import struct
 import threading
-from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import rclpy
@@ -29,6 +27,8 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2
 import websockets
+from websockets.http import Headers
+from websockets.http11 import Response
 
 FRAME_MAGIC = b"WPCB"
 FRAME_VERSION = 1
@@ -41,6 +41,15 @@ _STATIC_CANDIDATES = [
     _SCRIPT_DIR.parents[1] / "share" / "rslidar_lio_adapter" / "webgl_viewer_static",  # 安装后
 ]
 STATIC_DIR = next((p for p in _STATIC_CANDIDATES if p.is_dir()), _STATIC_CANDIDATES[0])
+
+MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+}
 
 
 def get_lan_ip():
@@ -57,8 +66,8 @@ def get_lan_ip():
 class WebGLViewServer(Node):
     def __init__(self):
         super().__init__("webgl_view_server")
-        self.http_port = int(self.declare_parameter("http_port", 8899).value)
-        self.ws_port = int(self.declare_parameter("ws_port", 8898).value)
+        # HTTP 页面和 WebSocket 共用同一个端口, 只需放行一个端口
+        self.port = int(self.declare_parameter("port", 8899).value)
         topics_cfg = self.declare_parameter(
             "topics", "/merged_points_lite,/merged_points_bev_lite").value
         self.topic_names = [t.strip() for t in topics_cfg.split(",") if t.strip()]
@@ -188,39 +197,49 @@ class WebGLViewServer(Node):
 
         await asyncio.gather(sender(), receiver())
 
+    def _serve_static(self, path):
+        rel = path.lstrip("/").split("?", 1)[0]
+        if not rel:
+            rel = "index.html"
+        target = (STATIC_DIR / rel).resolve()
+        try:
+            target.relative_to(STATIC_DIR.resolve())
+        except ValueError:
+            return Response(403, "Forbidden", Headers(), b"403 Forbidden")
+        if not target.is_file():
+            return Response(404, "Not Found", Headers(), b"404 Not Found")
+        ctype = MIME.get(target.suffix.lower(), "application/octet-stream")
+        return Response(200, "OK", Headers({"Content-Type": ctype}), target.read_bytes())
+
+    def _process_request(self, connection, request):
+        # WebSocket 升级请求必须放行 (返回 None), 否则会被当成页面请求
+        if request.headers.get("Upgrade", "").lower() == "websocket":
+            return None
+        # 非 WebSocket 升级请求 -> 直接返回静态页面/脚本
+        return self._serve_static(request.path)
+
     def _start_ws(self):
         async def serve_forever():
             async with websockets.serve(
-                    self._ws_handler, "0.0.0.0", self.ws_port,
-                    max_size=None, ping_interval=10, ping_timeout=30):
+                    self._ws_handler, "0.0.0.0", self.port,
+                    max_size=None, ping_interval=10, ping_timeout=30,
+                    process_request=self._process_request):
                 await asyncio.Future()  # 永久运行
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(serve_forever())
 
-    def _start_http(self):
-        class Handler(SimpleHTTPRequestHandler):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
-
-            def log_message(self, fmt, *args):  # 静默访问日志
-                pass
-
-        httpd = ThreadingHTTPServer(("0.0.0.0", self.http_port), Handler)
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
-
     def start_servers(self):
-        self._start_http()
         threading.Thread(target=self._start_ws, daemon=True).start()
         ip = get_lan_ip()
         self.get_logger().info(
             "\n"
             "===============================================\n"
             "  WebGL 查看器已启动 (免费自建, 无需任何账号)\n"
-            f"  浏览器打开: http://{ip}:{self.http_port}\n"
-            f"  WebSocket: ws://{ip}:{self.ws_port}\n"
-            "  同网段需放行 8899/8898 端口\n"
+            f"  浏览器打开: http://{ip}:{self.port}\n"
+            f"  WebSocket 同端口: ws://{ip}:{self.port}\n"
+            f"  同网段只需放行 {self.port} 端口\n"
             "===============================================")
 
 

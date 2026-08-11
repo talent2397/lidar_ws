@@ -91,17 +91,25 @@ public:
 private:
   void cloud1_cb(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
   {
-    c1_ = msg;
-    t1_ = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
-    // 乱序/旧帧到达时不重复发布 (内容会被下一次更新带出), 保持时间戳递增
-    if (!c2_ || t1_ > t2_) publish_latest();
+    try {
+      c1_ = msg;
+      t1_ = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
+      // 乱序/旧帧到达时不重复发布 (内容会被下一次更新带出), 保持时间戳递增
+      if (!c2_ || t1_ > t2_) publish_latest();
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(get_logger(), "cloud1_cb exception: %s", e.what());
+    }
   }
 
   void cloud2_cb(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
   {
-    c2_ = msg;
-    t2_ = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
-    if (!c1_ || t2_ > t1_) publish_latest();
+    try {
+      c2_ = msg;
+      t2_ = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
+      if (!c1_ || t2_ > t1_) publish_latest();
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(get_logger(), "cloud2_cb exception: %s", e.what());
+    }
   }
 
   void publish_latest()
@@ -202,14 +210,24 @@ private:
     if (out.empty()) return true;
     geometry_msgs::msg::TransformStamped tf;
     // 非阻塞: 用 canTransform 预检, 避免阻塞 executor 造成丢帧
-    if (tf_buffer_.canTransform(frame_id_, "base_link", stamp, tf2::durationFromSec(0.0))) {
-      tf = tf_buffer_.lookupTransform(frame_id_, "base_link", stamp);
-    } else if (tf_buffer_.canTransform(
-                 frame_id_, "base_link", rclcpp::Time(), tf2::durationFromSec(0.0))) {
-      tf = tf_buffer_.lookupTransform(frame_id_, "base_link", rclcpp::Time());
-    } else {
+    // TF 查询可能抛异常 (帧缺失/缓存问题), 必须兜底, 否则未捕获异常会让进程 abort
+    try {
+      if (tf_buffer_.canTransform(frame_id_, "base_link", stamp, tf2::durationFromSec(0.0))) {
+        tf = tf_buffer_.lookupTransform(frame_id_, "base_link", stamp);
+      } else if (tf_buffer_.canTransform(
+                   frame_id_, "base_link", rclcpp::Time(), tf2::durationFromSec(0.0))) {
+        tf = tf_buffer_.lookupTransform(frame_id_, "base_link", rclcpp::Time());
+      } else {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+          "no TF %s -> base_link at %.3f", frame_id_.c_str(), stamp.seconds());
+        return false;
+      }
+    } catch (const tf2::TransformException & e) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-        "no TF %s -> base_link at %.3f", frame_id_.c_str(), stamp.seconds());
+        "TF lookup failed: %s", e.what());
+      return false;
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(get_logger(), "TF exception: %s", e.what());
       return false;
     }
     const Eigen::Matrix4d M = tf_to_matrix(tf);

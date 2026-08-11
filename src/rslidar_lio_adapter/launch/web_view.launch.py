@@ -5,8 +5,8 @@
   /merged_points /merged_points_bev
       -> pointcloud_lite (VoxelGrid 0.1m, ~3Hz)
       -> /merged_points_lite /merged_points_bev_lite
-  webgl_view_server_node 订阅轻量话题, 经 WebSocket(8898) 推给浏览器,
-  HTTP(8899) 提供 three.js 页面; 渲染用调试电脑的 GPU, 不占机器人 CPU。
+  webgl_view_server_node 订阅轻量话题, 在同一端口(8899)上:
+  提供 three.js 页面 + WebSocket 推流; 渲染用调试电脑的 GPU, 不占机器人 CPU。
 
 用法:
   ros2 launch rslidar_lio_adapter web_view.launch.py
@@ -30,8 +30,7 @@ os.environ.setdefault("RMW_IMPLEMENTATION", "rmw_cyclonedds_cpp")
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('http_port', default_value='8899'),
-        DeclareLaunchArgument('ws_port', default_value='8898'),
+        DeclareLaunchArgument('port', default_value='8899'),
         DeclareLaunchArgument(
             'topics',
             default_value='/merged_points_lite,/merged_points_bev_lite'),
@@ -100,7 +99,7 @@ def generate_launch_description():
             }],
         ),
 
-        # 自建 WebGL 查看器: HTTP(8899) + WebSocket(8898)
+        # 自建 WebGL 查看器: HTTP 页面 + WebSocket 共用 8899
         Node(
             package='rslidar_lio_adapter',
             executable='webgl_view_server_node.py',
@@ -108,8 +107,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
-                'http_port': LaunchConfiguration('http_port'),
-                'ws_port': LaunchConfiguration('ws_port'),
+                'port': LaunchConfiguration('port'),
                 'topics': LaunchConfiguration('topics'),
             }],
         ),

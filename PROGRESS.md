@@ -296,16 +296,21 @@ spark-fast-lio 全链路稳定运行，odom ~60Hz、静止 116s 端到端漂移 
    VoxelGrid 0.1m + 限频 3Hz → `/merged_points_lite`、`/merged_points_bev_lite`；
    实测 119,778 → **30,102 点**（约 1/4）。
 2. `webgl_view_server_node.py`：订阅轻量点云 → 紧凑二进制帧（WPCB，
-   x/y/z/intensity float32）→ WebSocket(8898) 推流；HTTP(8899) 提供页面。
+   x/y/z/intensity float32）→ WebSocket 推流；HTTP 与 WebSocket 共用
+   8899 单端口（只需放行一个端口，避免浏览器连不上 8898 的问题）。
 3. `viewer.html`：three.js WebGL 页面，支持话题开关、点大小、
    3D/俯视 BEV 切换、强度配色、FPS 显示；three.js 已本地化，离线可用。
 4. `web_view.launch.py`：两个轻量节点 + 查看服务；`raw_lite:=true` 时
    额外生成原始 lidar1/2 降采样版（0.2m / 2Hz）。
 5. `play_bag.sh web / web-all`、`start_web_view.sh`：回放/实车一键浏览器观看。
+6. 融合节点加固：TF 查询异常兜底（不再因 tf2 异常 abort）；
+   `run_fusion_watchdog.sh` 守护，融合节点崩溃后 3 秒自动重启
+   （历史上有 SIGABRT 崩溃记录，已加入 launch 链路）。
 
 ### 端到端验证（bag `dual_fusion_20260811_152708`）
 
-- HTTP 页面正常加载（/、viewer.html、three.min.js、OrbitControls.js 均 200）；
+- 单端口 8899：HTTP 页面（/、viewer.html、three.min.js、OrbitControls.js 均 200）
+  与 WebSocket hello 均正常；
 - `web` 模式：WS 收到 `/merged_points_lite` 30,367 点/帧、
   `/merged_points_bev_lite` 12,357 点/帧，均 ~2-3Hz；
 - `web-all` 模式：额外收到 `/rslidar_points_1_lite`（5,110 点）、

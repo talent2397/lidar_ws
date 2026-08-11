@@ -47,7 +47,8 @@
 <script src="three.min.js"></script>
 <script src="OrbitControls.js"></script>
 <script>
-const WS_PORT = 8898;
+// HTTP 和 WebSocket 共用同一个端口 (默认 8899), 直接取页面端口
+const WS_PORT = location.port || '8899';
 const MAGIC = 'WPCB';
 
 const scene = new THREE.Scene();
