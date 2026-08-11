@@ -22,6 +22,7 @@
 | [CALIBRATION.md](CALIBRATION.md) | 已更新 | v10 标定文档 |
 | [PROGRESS.md](PROGRESS.md) | 已更新 | 本文，进度交接入口 |
 | [BAG分析汇总.md](BAG分析汇总.md) | 新建 | 全部 rosbag 数据分析汇总 |
+| [README.md](README.md) | 新建 | 项目入口与快速开始（当前旧融合链路） |
 | `snapshots/2026-08-04_1800/` | 新建 | 当前代码快照（只读备份） |
 | `src/spherical_robot_description/urdf/spherical_robot.urdf` | 已改 | v10 地面标定外参 |
 | `src/spherical_robot_description/launch/dual_lidar_fusion.launch.py` | 已改 | `suspension` 参数；融合节点指向 C++ |

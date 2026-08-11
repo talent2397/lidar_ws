@@ -418,6 +418,10 @@ colcon build --symlink-install
 
 ## 10. 后续规划：FAST-LIO2
 
+> **2026-08-11 状态更新**：FAST-LIO2 / 新融合 / WebGL 链路已实现并验证，
+> 但当前工作区已**回退到旧融合链路最终版（102121）**，本规划暂缓。
+> 新链路完整代码在 git 分支 `backup_new_lio_webgl_20260811`，需要时可恢复。
+
 ### 10.1 目标
 
 用 FAST-LIO2 做 IMU + LiDAR 紧耦合状态估计，输出里程计 `/Odometry`，解决：
