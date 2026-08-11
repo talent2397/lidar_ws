@@ -31,3 +31,4 @@ Thumbs.db
 # ROS bag files (large)
 *.bag
 *.db3
+bags/
