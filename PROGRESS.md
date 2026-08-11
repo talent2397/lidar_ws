@@ -1,8 +1,13 @@
-# 项目进度交接（2026-08-05，最终验证通过）
+# 项目进度交接（2026-08-11，已回退至旧融合链路最终版）
 
 > 新终端请先看这个文件。详细历史见 [记录.md](记录.md)，标定文档见 [CALIBRATION.md](CALIBRATION.md)，
 > 代码快照：`snapshots/2026-08-05_最终102121/`（最新，含 QoS 修复）；
 > 历史：`snapshots/2026-08-04_1800/`（345 修正前）、`snapshots/2026-08-05_球心345修正/`。
+
+> **2026-08-11 回退说明**：工作区已从 FAST-LIO2 / 新融合 / WebGL 浏览器查看链路
+> **回退到旧融合链路最终版（102121 验证版本）**，多余的新链路代码已全部剔除。
+> 新链路完整代码备份在 git 分支 `backup_new_lio_webgl_20260811`，
+> 如需恢复请 `git switch backup_new_lio_webgl_20260811` 后重新 `colcon build`。
 
 ## 一句话状态
 
@@ -26,6 +31,8 @@
 | `src/spherical_robot_description/CMakeLists.txt` / `package.xml` | 已改 | 增加 C++ 目标与依赖 |
 | `record_bag.sh` | 已改 | sqlite 崩溃自动重试 |
 | `scripts/live_z_monitor.py` | 新建 | 实时 z 监控 |
+| `scripts/analyze_merged_penetration.py` | 新建 | 按 102121 口径分析 merged 穿透（点 z<-0.2m / 静止运动分段） |
+| `.gitignore` | 已改 | 忽略 `bags/` 目录（大 bag 数据不入 git） |
 
 ## 验证结果摘要（运动段 点<-0.2m 比例）
 
@@ -38,19 +45,25 @@
 | 175142 | C++ 崩溃（已修复） | 无输出 |
 | 101536 | 全修复 | 0.65%（静止 0.04%），3.72Hz |
 | 102121（最新） | 当前版本 | **0.24%（静止 0.06%），4.43Hz** |
+| 20260811_171219_r2 | 回退后复测 | **待分析**（184 帧/74s = 2.48Hz，明显低于 102121） |
 
-## 下一步（可选优化，非必需）
+## 下一步
 
-1. 提频：`sync_window` 0.08 → 0.12，频率 ~3.7Hz → ~5-6Hz（两雷达时间错位略增）；
-2. 进一步压运动残余：逐行去畸变，或上 FAST-LIO2（方案见 CALIBRATION.md 第 10 节）；
-3. z 回弹补偿参数按实测微调。
+1. **分析新 bag `dual_lidar_20260811_171219_r2`**（穿透率/频率，与 102121 对比）：
+   回放用 `bash play_bag.sh`；离线分析用 `python3 scripts/analyze_merged_penetration.py`
+   （配合 `ros2 bag play --topics /merged_points /tf /rslidar_imu_data_1`）；
+2. 若频率/穿透不达标：查录制时 CPU/IMU 丢包，或提频 `sync_window` 0.08 → 0.12；
+3. 进一步压运动残余：逐行去畸变（方案见 CALIBRATION.md 第 10 节）；
+4. z 回弹补偿参数按实测微调。
 
 日常使用：
 
 ```bash
 bash start_lidar.sh suspension:=true rviz:=true   # 带动态补偿启动
 bash record_bag.sh                                # 录制（自动重试）
+bash play_bag.sh                                  # 回放最新 dual_lidar_* bag + RViz
 python3 /home/wz/lidar_0804/scripts/live_z_monitor.py  # 实时 z 监控
+python3 /home/wz/lidar_0804/scripts/analyze_merged_penetration.py  # 离线穿透分析
 ```
 
 ## 关键参数（当前值）
