@@ -8,7 +8,7 @@ Visualization Manager:
   Displays:
     - Class: rviz_default_plugins/Grid
       Name: Grid
-      Fixed Frame: odom
+      Fixed Frame: world
       Plane Cell Count: 40
       Cell Size: 1
     - Class: rviz_default_plugins/Path
@@ -16,36 +16,48 @@ Visualization Manager:
       Topic:
         Value: /path
     - Class: rviz_default_plugins/PointCloud2
-      Name: CloudRegisteredBase
+      Name: LiDAR1 Raw
+      Enabled: true
       Topic:
-        Value: /cloud_registered_base
+        Value: /rslidar_points_1
       Style: Points
       Size (Pixels): 2
     - Class: rviz_default_plugins/PointCloud2
-      Name: CloudBody
-      Topic:
-        Value: /cloud_registered_body
-      Style: Points
-      Size (Pixels): 2
-    - Class: rviz_default_plugins/PointCloud2
-      Name: LiDAR2 Points
-      Enabled: false
+      Name: LiDAR2 Raw
+      Enabled: true
       Topic:
         Value: /rslidar_points_2
       Style: Points
       Size (Pixels): 2
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Merged Points (odom, de-skewed)
+      Enabled: true
+      Topic:
+        Value: /merged_points
+      Style: Points
+      Size (Pixels): 2
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Merged Points BEV (z=0)
+      Enabled: true
+      Topic:
+        Value: /merged_points_bev
+      Style: Points
+      Size (Pixels): 3
     - Class: rviz_default_plugins/TF
       Name: TF
       Enabled: true
       Frame Timeout: 5
-  Fixed Frame: odom
+  Fixed Frame: world
   Grid:
     Enabled: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 10
+      Distance: 20
       Focal Point:
         X: 0
         Y: 0
         Z: 0
+      Name: BEV Top Down
+      Pitch: 1.570796
+      Yaw: 0

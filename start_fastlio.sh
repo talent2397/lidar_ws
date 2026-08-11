@@ -4,6 +4,7 @@
 #  链路: rslidar_sdk(XYZIRT) -> adapter -> spark-fast-lio
 #  输出: /odometry /path /cloud_registered*  TF: world -> odom -> base_link
 #  参数: rviz:=true / save_map:=true / extrinsic_est:=true /
+#        dual_lidar:=true (lidar2 补偿+融合+BEV) / use_sim_time:=true (离线回放) /
 #        compat_fusion:=true / world_z_offset:=0.345
 # ==========================================
 

@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 add_executable(rslidar_lio_adapter_node src/rslidar_lio_adapter_node.cpp)
 ament_target_dependencies(
@@ -15,7 +19,33 @@ ament_target_dependencies(
   sensor_msgs
 )
 
+add_executable(rslidar_points_2_processor_node src/rslidar_points_2_processor_node.cpp)
+ament_target_dependencies(
+  rslidar_points_2_processor_node
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+)
+target_link_libraries(rslidar_points_2_processor_node Eigen3::Eigen)
+
+add_executable(dual_lidar_fusion_node src/dual_lidar_fusion_node.cpp)
+ament_target_dependencies(
+  dual_lidar_fusion_node
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+)
+target_link_libraries(dual_lidar_fusion_node Eigen3::Eigen)
+
 install(TARGETS rslidar_lio_adapter_node
+  DESTINATION lib/${PROJECT_NAME})
+install(TARGETS rslidar_points_2_processor_node
+  DESTINATION lib/${PROJECT_NAME})
+install(TARGETS dual_lidar_fusion_node
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch config

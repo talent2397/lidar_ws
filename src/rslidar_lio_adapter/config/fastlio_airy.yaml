@@ -4,7 +4,7 @@
       map_frame: "odom"
       lidar_frame: "rslidar_1"
       base_frame: "base_link"
-      imu_frame: "rslidar_1"
+      imu_frame: "rslidar_1_imu"
       visualization_frame: "base"
       time_sync_en: false
       save_dir: "/home/wz/lidar_0804/bags/maps"

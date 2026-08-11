@@ -222,6 +222,12 @@ class SPARKFastLIO2 : public rclcpp::Node {
   std::mutex mtx_buffer_;
   std::condition_variable sig_buffer_;
 
+  // odometry/TF 同时由 IMU 线程(200Hz)和 lidar 线程(10Hz)发布,
+  // 两个时间源存在滞后, 会导致 header stamp 周期性倒退;
+  // 用该锁+上次时间戳把发布时间钳制成严格递增。
+  std::mutex odom_stamp_mutex_;
+  int64_t last_odom_stamp_ns_ = 0;
+
   std::string root_dir_ = ROOT_DIR;
   std::string map_file_path_;
   std::string save_dir_;

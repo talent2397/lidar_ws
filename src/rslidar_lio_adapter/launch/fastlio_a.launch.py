@@ -12,9 +12,15 @@
   ros2 launch rslidar_lio_adapter fastlio_a.launch.py world_z_offset:=0.319
   # 离线回放已录 bag (不启动驱动):
   #   ros2 launch rslidar_lio_adapter fastlio_a.launch.py use_driver:=false
+  #   ros2 launch rslidar_lio_adapter fastlio_a.launch.py use_driver:=false use_sim_time:=true
   #   ros2 bag play bags/fastlio_xxx
-  # 同时看两台雷达点云 (不进 LIO, 仅查看; CPU 会高一些):
+  #   ros2 bag play bags/fastlio_xxx --clock   # 离线回放请加 --clock
+  # 双雷达模式: 驱动解两台雷达, 启动 lidar2 逐点补偿 + 融合 (CPU 会高一些):
   #   ros2 launch rslidar_lio_adapter fastlio_a.launch.py dual_lidar:=true
+  #   dual_lidar:=true 时额外输出:
+  #     /rslidar_points_2_processed  (lidar2 逐点运动补偿, odom 系)
+  #     /merged_points               (lidar1(LIO) + lidar2 融合, odom 系)
+  #     /merged_points_bev           (融合点云 z 压平, BEV 鸟瞰视角)
 """
 
 from launch import LaunchDescription
@@ -45,6 +51,9 @@ def generate_launch_description():
     z_arg = DeclareLaunchArgument(
         'world_z_offset', default_value='0.345',
         description='world->odom 静态 z 偏移 (球心离地高度, 可微调)')
+    sim_arg = DeclareLaunchArgument(
+        'use_sim_time', default_value='false',
+        description='离线回放 bag 时置 true (配合 ros2 bag play --clock)')
 
     config_path = '/home/wz/lidar_0804/src/rslidar_lio_adapter/config/fastlio_airy.yaml'
     rviz_path = '/home/wz/lidar_0804/src/rslidar_lio_adapter/rviz/fastlio_a.rviz'
@@ -57,6 +66,7 @@ def generate_launch_description():
         est_arg,
         save_arg,
         z_arg,
+        sim_arg,
 
         # ① LiDAR driver (XYZIRT)
         Node(
@@ -79,6 +89,7 @@ def generate_launch_description():
             name='rslidar_lio_adapter',
             output='screen',
             parameters=[{
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
                 'cloud_in': '/rslidar_points_1',
                 'imu_in': '/rslidar_imu_data_1',
                 'cloud_out': '/fastlio/lidar_points',
@@ -94,6 +105,7 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 config_path,
+                {'use_sim_time': LaunchConfiguration('use_sim_time')},
                 {'mapping.extrinsic_est_en': PythonExpression(
                     ["'", LaunchConfiguration('extrinsic_est'), "' == 'true'"])},
                 {'pcd_save.pcd_save_en': PythonExpression(
@@ -113,6 +125,7 @@ def generate_launch_description():
             name='world_anchor',
             output='screen',
             parameters=[{
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
                 'imu_topic': '/rslidar_imu_data_1',
                 'odom_topic': '/odometry',
                 'base_z': LaunchConfiguration('world_z_offset'),
@@ -121,16 +134,28 @@ def generate_launch_description():
         # ⑤ TF: base_link -> rslidar_1 / rslidar_2 (URDF 标称外参)
         Node(
             package='tf2_ros', executable='static_transform_publisher',
-            arguments=['0', '0.007', '0.0693', '-1.5946', '0.0033', '-3.1147',
-                       'base_link', 'rslidar_1'],
+            arguments=['--x', '0', '--y', '0.007', '--z', '0.0693',
+                       '--yaw', '-3.1147', '--pitch', '0.0033', '--roll', '-1.5946',
+                       '--frame-id', 'base_link', '--child-frame-id', 'rslidar_1'],
         ),
         Node(
             package='tf2_ros', executable='static_transform_publisher',
-            arguments=['-0.05', '-0.137', '0.1032', '-1.4142', '-0.0231', '0.0238',
-                       'base_link', 'rslidar_2'],
+            arguments=['--x', '-0.05', '--y', '-0.137', '--z', '0.1032',
+                       '--yaw', '0.0238', '--pitch', '-0.0231', '--roll', '-1.4142',
+                       '--frame-id', 'base_link', '--child-frame-id', 'rslidar_2'],
+        ),
+        # ⑤c IMU 真实系: rslidar_1 内置 IMU 与 lidar 系差 R_lidar2imu (DIFOP)
+        #     /cloud_registered_body 的数据在 IMU 系, 必须用独立 frame 才能和 lidar 点云对齐
+        Node(
+            package='tf2_ros', executable='static_transform_publisher',
+            arguments=['--x', '0', '--y', '0.007', '--z', '0.0693',
+                       '--qx', '-0.487397349', '--qy', '-0.499452492',
+                       '--qz', '-0.493424371', '--qw', '0.519156392',
+                       '--frame-id', 'base_link', '--child-frame-id', 'rslidar_1_imu'],
         ),
 
-        # ⑥ 兼容模式: 旧融合节点 /merged_points (默认关闭)
+        # ⑥ 兼容模式: 旧融合节点 /merged_points (默认关闭;
+        #    不要与 dual_lidar:=true 同时开, 会和新融合节点抢 /merged_points)
         Node(
             package='spherical_robot_description',
             executable='point_cloud_fusion',
@@ -139,10 +164,50 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('compat_fusion')),
         ),
 
+        # ⑥b lidar2 逐点运动补偿: /rslidar_points_2 (rslidar_2 系, 原始)
+        #     -> /rslidar_points_2_processed (odom 系, 按每点时刻插值 TF)
+        Node(
+            package='rslidar_lio_adapter',
+            executable='rslidar_points_2_processor_node',
+            name='rslidar_points_2_processor',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('dual_lidar')),
+            parameters=[{
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
+                'cloud_in': '/rslidar_points_2',
+                'cloud_out': '/rslidar_points_2_processed',
+                'target_frame': 'odom',
+                'source_frame': 'rslidar_2',
+                'time_bins': 32,
+            }],
+        ),
+
+        # ⑥c 双雷达融合 + BEV 视角 (仅 dual_lidar:=true)
+        #     lidar1: /cloud_registered_base (LIO 稠密去畸变, base 系, 融合节点内转 odom)
+        #     lidar2: /rslidar_points_2_processed (odom 系)
+        #     -> /merged_points [odom] + /merged_points_bev [odom, z=0]
+        Node(
+            package='rslidar_lio_adapter',
+            executable='dual_lidar_fusion_node',
+            name='dual_lidar_fusion',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('dual_lidar')),
+            parameters=[{
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
+                'cloud1_in': '/cloud_registered_base',
+                'cloud2_in': '/rslidar_points_2_processed',
+                'merged_out': '/merged_points',
+                'bev_out': '/merged_points_bev',
+                'frame_id': 'odom',
+                'sync_window': 0.2,
+            }],
+        ),
+
         # ⑦ RViz
         Node(
             package='rviz2', executable='rviz2',
             arguments=['-d', rviz_path],
             condition=IfCondition(LaunchConfiguration('rviz')),
+            parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
         ),
     ])

@@ -1,22 +1,23 @@
 # 双 RoboSense Airy LiDAR 融合项目（球式机器人）
 
-> **状态（2026-08-05）**：FAST-LIO2 方案A 已上线并通过运动验收 ——
+> **状态（2026-08-11）**：FAST-LIO2 方案A 已上线并通过运动验收 ——
 > 静止 116s 漂移 0.27cm、运动往返闭合 13.25cm、odom ~60-100Hz、点云无断流；
+> lidar2 逐点补偿 + 双雷达融合 + BEV 视角已上线（`dual_lidar:=true`）；
+> 2D 占用栅格建图代码已按需移除。
 > 旧融合方案（动态补偿 v3 + C++ 融合节点，静止 0.06% / 运动 0.24% 穿透）保留可回退。
 
 ## 项目简介
 
-ROS 2 Humble（Jetson ARM64）上的双 RoboSense Airy 96 线激光雷达融合系统：
-左右两个雷达通过 TF2 变换到 `world`（地面 z=0）坐标系，时间同步后融合为
-`/merged_points` 单话题输出。
+ROS 2 Humble（Jetson ARM64）上的双 RoboSense Airy 96 线激光雷达融合系统。
 
-核心链路：雷达驱动 →（可选）IMU 动态悬挂补偿 → C++ 融合节点（按到达时刻回查 TF）→
-`/merged_points`。
+**旧链路（可回退）**：雷达驱动 →（可选）IMU 动态悬挂补偿 → C++ 融合节点
+（按到达时刻回查 TF）→ `/merged_points` [world]。
 
 **新链路（方案A，推荐）**：雷达驱动(XYZIRT) → 适配节点 → FAST-LIO2（IMU 紧耦合 LIO）
-→ `/odometry` + `/cloud_registered` + 3D/2D 地图。
+→ `/odometry` + `/cloud_registered*`；`dual_lidar:=true` 时叠加
+lidar2 逐点补偿 → 双雷达融合 → `/merged_points` + `/merged_points_bev`（均 odom 系）。
 
-方案A 当前状态：✅ 静止漂移 / ✅ 运动往返闭合 / ⏳ 水平地面穿透验收 / ⏳ 30min 长稳。
+方案A 当前状态：✅ 静止漂移 / ✅ 运动往返闭合 / ✅ 30min 长稳 / ⏳ 水平地面穿透验收。
 
 ## 文档导航
 
@@ -46,20 +47,27 @@ bash start_fastlio.sh                              # 默认启动 LIO 链路
 bash start_fastlio.sh rviz:=true                   # 带 RViz（查看用，录制时不要开）
 bash start_fastlio.sh save_map:=true               # 同时保存 PCD 地图
 bash start_fastlio.sh extrinsic_est:=true          # 在线标定 IMU-LiDAR 外参
+bash start_fastlio.sh dual_lidar:=true rviz:=true   # 双雷达：lidar2 处理 + 融合 + BEV
 bash record_fastlio.sh                             # 录制 LIO 验收 bag
+bash record_dual.sh                                # 录制双雷达融合验证 bag
 ```
 
 离线回放已录 bag：
 
 ```bash
-ros2 launch rslidar_lio_adapter fastlio_a.launch.py use_driver:=false rviz:=true
-ros2 bag play bags/fastlio_<时间戳> --topics /rslidar_points_1 /rslidar_imu_data_1
+ros2 launch rslidar_lio_adapter fastlio_a.launch.py use_driver:=false rviz:=true use_sim_time:=true
+ros2 bag play bags/fastlio_<时间戳> --clock --topics /rslidar_points_1 /rslidar_imu_data_1
 ```
 
 输出：
 
 - `/odometry`、`/path`（FAST-LIO 里程计，约 60Hz）
-- `/cloud_registered`（地图/点云，base 系）、`/cloud_registered_body`、`/cloud_registered_base`
+- **RViz 查看（已配置）**：`/rslidar_points_1`、`/rslidar_points_2`（原始点云）、
+  `/merged_points`（去畸变融合，odom 系，后续建图直接消费）、
+  `/merged_points_bev`（BEV 视角，z=0）
+- **内部/调试话题（默认不在 RViz 显示）**：`/cloud_registered`（LIO odom 系稀疏特征点）、
+  `/cloud_registered_base`（base 系稠密去畸变）、`/cloud_registered_body`（IMU 系）、
+  `/rslidar_points_2_processed`（lidar2 补偿，odom 系，已含在 `/merged_points` 中）
 - TF：`world → odom → base_link → rslidar_1/2`（world→odom 由 world_anchor 按 IMU 初始姿态生成）
 - `src/spark-fast-lio/spark_fast_lio/PCD/scans_*.pcd`（`save_map:=true` 时）
 
@@ -69,7 +77,8 @@ ros2 bag play bags/fastlio_<时间戳> --topics /rslidar_points_1 /rslidar_imu_d
 - rslidar_1 外参：`xyz=(0, 0.007, 0.0693)`，`rpy=(-1.5946, 0.0033, -3.1147)`
 - rslidar_2 外参：`xyz=(-0.05, -0.137, 0.1032)`，`rpy=(-1.4142, -0.0231, 0.0238)`
 - 动态补偿：`ACCEL_CORR_MAX_ANGLE_DEG=30`、`Z_MAX=0.15`、陀螺零偏 ~2.5s 收敛
-- 融合：`tf_lookup_offset=0.05s`、`sync_window=0.08s`、定时器 20ms、QoS reliable
+- 新融合：`sync_window=0.2s`、lidar2 `time_bins=32`、输出 `/merged_points` [odom]；
+  旧链：`tf_lookup_offset=0.05s`、`sync_window=0.08s`、定时器 20ms、QoS reliable
 - LIO：`lidar_type=2`、`scan_line=96`、`timestamp_unit=0`、`point_filter_num=4`、
   `filter_size_map=0.2`、`blind=0.3`、`extrinsic_est=false`；LIO 模式驱动只解主雷达
   （详见 CALIBRATION.md 第 12 节）
@@ -78,7 +87,7 @@ ros2 bag play bags/fastlio_<时间戳> --topics /rslidar_points_1 /rslidar_imu_d
 
 ```text
 src/spherical_robot_description/   # 自建包：URDF / launch / 融合节点 / 补偿脚本 / world_anchor
-src/rslidar_lio_adapter/           # 方案A 新增：XYZIRT -> FAST-LIO 适配节点 + launch + 配置
+src/rslidar_lio_adapter/           # 方案A：适配节点 + lidar2 补偿/融合节点 + launch + 配置
 src/spark-fast-lio/                # 方案A 新增：FAST-LIO2 (MIT-SPARK 移植, 含 Airy 适配)
 src/rslidar_sdk/                   # RoboSense SDK（上游，POINT_TYPE 已切 XYZIRT）
 scripts/                           # 标定、bag 分析、监控脚本
@@ -89,6 +98,6 @@ bags/                              # rosbag 数据（含 _broken/ 残包）
 ## 说明
 
 - 测试地面必须水平，斜面会让点云相对平坦 grid 必然“穿透”。
-- 当前目录未启用 git 版本管理，重要版本以 `snapshots/` 目录存档。
+- 当前目录已启用 git 版本管理；重要历史版本仍以 `snapshots/` 目录存档。
 - 快照目录内的 `package.xml` / `CMakeLists.txt` 以 `.bak` 后缀保存，
   避免 colcon 将快照误认为包。

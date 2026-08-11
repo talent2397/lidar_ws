@@ -77,7 +77,7 @@ private:
   {
     auto out = std::make_shared<sensor_msgs::msg::Imu>(*msg);
     // 防御: 保证输出 IMU 时间戳严格递增 (驱动已改单调时钟, 这里双保险)
-    rclcpp::Time stamp(out->header.stamp);
+    rclcpp::Time stamp(out->header.stamp, RCL_ROS_TIME);
     if (stamp <= last_imu_stamp_) {
       // +1µs: 驱动时间戳为微秒分辨率, +1ns 在 double 秒精度下不可见
       stamp = last_imu_stamp_ + rclcpp::Duration::from_nanoseconds(1000);

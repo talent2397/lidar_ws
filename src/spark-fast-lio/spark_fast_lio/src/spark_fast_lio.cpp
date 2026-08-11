@@ -722,8 +722,19 @@ void SPARKFastLIO2::mapIncremental() {
 }
 
 void SPARKFastLIO2::publishOdometry(const state_ikfom &state, const rclcpp::Time &stamp) {
+  rclcpp::Time pub_stamp = stamp;
+  {
+    std::lock_guard<std::mutex> lk(odom_stamp_mutex_);
+    int64_t ns = pub_stamp.nanoseconds();
+    if (ns <= last_odom_stamp_ns_) {
+      ns = last_odom_stamp_ns_ + 1000;  // +1µs, 保证严格递增
+    }
+    last_odom_stamp_ns_ = ns;
+    pub_stamp = rclcpp::Time(ns);
+  }
+
   odomAftMapped_.header.frame_id = map_frame_;
-  odomAftMapped_.header.stamp    = stamp;
+  odomAftMapped_.header.stamp    = pub_stamp;
 
   setPoseStamp(state, odomAftMapped_.pose, viz_frame_);  // our template function
 
@@ -753,7 +764,7 @@ void SPARKFastLIO2::publishOdometry(const state_ikfom &state, const rclcpp::Time
   pub_odom_->publish(odomAftMapped_);
 
   geometry_msgs::msg::TransformStamped transform_stamped;
-  transform_stamped.header.stamp    = odomAftMapped_.header.stamp;
+  transform_stamped.header.stamp    = pub_stamp;
   transform_stamped.header.frame_id = map_frame_;
   transform_stamped.child_frame_id  = odomAftMapped_.child_frame_id;
 
@@ -792,8 +803,8 @@ void SPARKFastLIO2::publishFrameWorld(
   PointCloudXYZI::Ptr laserCloudWorld(new PointCloudXYZI(size, 1));
   PointCloudXYZI::Ptr laserCloudTmp(new PointCloudXYZI(size, 1));
 
-  // NOTE: /cloud_registered 在 visualization_frame=base 时携带 base 系点云,
-  // 但其 header.frame_id 仍标为 map(odom)。要查看请用 /cloud_registered_base。
+  // /cloud_registered 始终输出 map/odom 系全局地图 (header=odom, 数据=odom)。
+  // 需要机器人/base 系副本时用 /cloud_registered_base (header=base_link)。
   for (int i = 0; i < size; i++) {
     if (viz_frame_ == "imu") {
       pclPointBodyToWorld(&laserCloudFullRes->points[i], &laserCloudWorld->points[i]);
@@ -802,7 +813,7 @@ void SPARKFastLIO2::publishFrameWorld(
       pclPointIMUToLiDAR(&laserCloudTmp->points[i], &laserCloudWorld->points[i]);
     } else if (viz_frame_ == "base") {
       pclPointBodyToWorld(&laserCloudFullRes->points[i], &laserCloudTmp->points[i]);
-      pclPointIMUToBase(&laserCloudTmp->points[i], &laserCloudWorld->points[i]);
+      laserCloudWorld->points[i] = laserCloudTmp->points[i];
     } else {
       throw std::invalid_argument("Invalid visualization frame has been given");
     }
@@ -1139,8 +1150,11 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
   }
 
   /******* Publish topics *******/
-  const auto stamp = rclcpp::Time(lidar_end_time_ * 1e9);
-  publishOdometry(latest_state_, stamp);
+  // 注意: odometry/TF 只由 IMU 线程发布(200Hz, IMU 时间戳)。
+  // 之前 lidar 线程也在这里发布一帧(用 lidar_end_time), 两个时间源
+  // 交替导致 header stamp 倒退; 加时间戳钳制后又变成"同时间戳瞬时跳变"
+  // (lidar 修正前后的位姿几乎同一时刻发出), 会在地图里造成重影。
+  // lidar 修正后的位姿会在下一个 IMU 样本(约 5ms 后)自动发布, 延迟可忽略。
   mapIncremental();
 
   if (path_en_) {

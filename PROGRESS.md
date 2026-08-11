@@ -4,6 +4,168 @@
 > [PLAN_FASTLIO2_方案A.md](PLAN_FASTLIO2_方案A.md)；标定文档见 [CALIBRATION.md](CALIBRATION.md)；
 > 历史排查见 [记录.md](记录.md)。
 
+## 2026-08-11 新增：lidar2 逐点补偿 + 双雷达融合 + BEV 视角（移除栅格建图）
+
+按用户要求：暂不继续 2D 占用栅格建图，先把手头数据处理好——
+**lidar1 已由 FAST-LIO2 处理**（稠密去畸变在 `/cloud_registered_base` [base 系]，
+`/cloud_registered` 在 `dense_publish_en=false` 时只是 odom 系稀疏特征点），
+**lidar2 此前只有原始点云**，本次补齐 lidar2 处理链路并融合。
+
+### lidar2 处理（`rslidar_points_2_processor_node`）
+
+- 输入：`/rslidar_points_2`（rslidar_2 系，XYZIRT，帧内 ~100ms 运动畸变）；
+- 方法：按每点绝对时间戳分 `time_bins=32` 个时间片，tf2 在 LIO 的
+  `odom→base_link` TF（200Hz）之间插值，取 `odom→rslidar_2` 位姿逐片变换，
+  同时消除旋转+平移畸变（比 feature 分支 `rslidar_points_2_map_node` 的
+  1 个时间片更精细）；
+- 输出：`/rslidar_points_2_processed` [odom]，保留 XYZIRT 字段，
+  header 时间戳与输入一致。
+
+### 双雷达融合（`dual_lidar_fusion_node`）
+
+- lidar1：`/cloud_registered_base`（LIO 稠密去畸变点云，base 系；
+  `dense_publish_en=false` 时 `/cloud_registered` 只是稀疏特征点，
+  所以融合用 base 系版本，节点内按扫描时刻 `odom→base_link` TF 转 odom）；
+- lidar2：`/rslidar_points_2_processed`（odom 系）；
+- 按 header 时间戳配对（`sync_window=0.2s`，两雷达相位锁定，配对稳定），
+  合并为 `/merged_points` [odom]（XYZI）；
+- 同时输出 `/merged_points_bev` [odom]（z 压平为 0，即 BEV 鸟瞰视角），
+  RViz 默认视角已切换为俯视。
+
+**融合策略修正（2026-08-11，bag `dual_fusion_20260811_145920` 分析后）**：
+
+- 现象：原“逐帧配对”逻辑在到达顺序抖动时会输出大量单侧帧（只含 lidar1 或
+  只含 lidar2）和重复帧，RViz 里看起来像“只有某台雷达”。
+- 实测确认：`/cloud_registered_base` 正常（429 帧/58s，~40k 点/帧），配对帧
+  （~12 万点）空间范围同时覆盖两雷达，数据本身两边都有。
+- 修复（v3）：任一侧来新帧就用“最新 lidar1 + 最新 lidar2”合成一帧；
+  订阅队列深度 50、TF 查询非阻塞；乱序旧帧不重复发布。
+- 离线回放验证（同一 bag）：533 帧 @9.2Hz，531 帧 >10 万点（双雷达），
+  首帧启动期 2 帧单侧，0 重复帧，时间戳严格递增，BEV 与 merged 点数一致。
+
+### RViz 点云显示（精简后 4 个）
+
+- `/rslidar_points_1`、`/rslidar_points_2`：两台雷达原始点云（必须保留）；
+- `/merged_points`：去畸变融合点云（odom 系，lidar1 base→odom + lidar2 逐点补偿），
+  后续建图直接消费它；
+- `/merged_points_bev`：BEV 视角（z=0）。
+- `/cloud_registered*`、`/rslidar_points_2_processed` 仍发布，但默认不在 RViz 显示。
+
+### 启动与录包
+
+```bash
+bash start_fastlio.sh dual_lidar:=true rviz:=true   # 查看融合/BEV
+bash record_dual.sh                                  # 录融合验证包
+```
+
+### 已移除的建图代码
+
+- `rslidar_lio_adapter/scripts/bev_2d_mapper.py`、`bev_grid.py`；
+- `scripts/validate_bev_map.py`；
+- launch 中 `bev_map`/`bev_save` 参数与节点、CMake 安装项。
+- 工作区根目录的旧生成图 `map_lidar1*.pgm/png` 已不在（未跟踪产物）。
+
+## 2026-08-10 修复：static_transform_publisher 欧拉角顺序错误
+
+**问题**：RViz 中 LIO 地图、lidar1 原始点云、lidar2 原始点云互相错位，
+点云相对 grid 竖直、探到 grid 下方；lidar_存档 旧链显示正常。
+
+**根因**：`rslidar_lio_adapter/launch/fastlio_a.launch.py` 里
+`tf2_ros static_transform_publisher` 使用位置参数时顺序是
+`x y z yaw pitch roll`，但 launch 按 URDF 的 `roll pitch yaw` 传参，
+导致 `base→rslidar_1/2` 旋转四元数 x/z 分量互换（偏约 90°）。
+旧链用 `robot_state_publisher` 读 URDF，所以正确。
+
+**修复**：改用命名参数 `--x --y --z --yaw --pitch --roll --frame-id --child-frame-id`，
+避免顺序歧义；RViz Fixed Frame 从 `odom` 改回 `world`（grid 在地面，
+base_link 通过 world→odom + odom→base 落在约 0.345m 高度）；
+RViz 默认显示 `/rslidar_points_1` 和 `/rslidar_points_2`。
+
+**验证**（bag `dual_lio_20260810_141546` 逐帧 + 实机 /tf_static）：
+
+- 实机发布的静态四元数与 URDF/旧链完全一致；
+- 修正后 lidar1 地面点 z≈-0.36m（odom 系，即 base 下方 0.345m），
+  lidar2 z 中位 ≈0.9m，恢复“下/上互补”形态；
+- LIO 地图（还原到 base 系）与 raw lidar1 逐帧 z 分布一致、法向角同为 7.5°。
+
+**补充修复：/cloud_registered_body 坐标系**：
+
+- 该话题数据是“IMU/body 系”的去畸变点云，但原配置把 `imu_frame` 标成
+  `rslidar_1`（lidar 系），两系差 `R_lidar2imu`（约 180° 旋转），
+  导致 RViz 里 cloud_body 与 lidar1/lidar2 呈倒置/垂直错位；
+- 已改为独立 IMU 系 `rslidar_1_imu`（launch 新增
+  `base_link→rslidar_1_imu` 静态 TF，四元数由 `R_base_lidar @ R_lidar2imu` 算出），
+  cloud_body 与 raw lidar1 的残余角度仅 0.7°。
+
+**运动时 raw 点云穿透说明**：`/rslidar_points_1/2` 是整帧按单个 TF 刚性变换的
+原始点云，帧内 0~100ms 的扫描时刻没有逐点去畸变，运动时地面点会“拖影/穿透”；
+这是原始点云显示的正常现象，不是外参错误。去畸变后的点云请用
+`/cloud_registered_base`（lidar1）和 `/cloud_registered_body`（修正后与 lidar1 对齐）；
+lidar2 逐点补偿可用 feature 分支的 `rslidar_points_2_map_node`
+（注：2026-08-11 已由 `rslidar_points_2_processor_node` 正式实现并集成）。
+
+**建图坐标系修正：/cloud_registered 恢复为 odom 系地图**：
+
+- FAST-LIO 内部全局地图、odometry、保存的 PCD 本来就是 odom/map 系；
+- 但移植版在 `visualization_frame=base` 时把 `/cloud_registered` 也转成了
+  base 系点云（header 却标 odom），导致“地图话题”不能直接用于建图；
+- 已修改 `publishFrameWorld`：`/cloud_registered` 始终输出 odom 系全局地图
+  （header=odom，数据=odom）；`/cloud_registered_base` 保持 base 系（header=base_link）。
+- 后续 2D/3D 建图可直接消费 `/cloud_registered`（固定到 odom 或 world 均可，
+  world→odom 是静态锚定，二者只差一个常数变换）。
+
+**修复：odometry/TF 时间戳周期性倒退（bag `fastlio_20260810_162133`）**：
+
+- 现象：`/odometry` 与 `/tf` 的 header stamp 每帧 lidar 更新就倒退一次，
+  43s 内倒退 426 次，幅度最大 812ms、中位 ~106ms；RViz 中 base_link/轨迹
+  会周期性向后跳变/抖动；
+- 根因：odometry/TF 由两个线程发布——IMU 线程按 IMU 时间戳(200Hz)、
+  lidar 线程按 lidar_end_time(10Hz)，两个时间源存在滞后，
+  导致 lidar 发布时 stamp 比上一次 IMU 发布更早；
+- 修复：`publishOdometry` 内对发布时间做严格递增钳制（+1µs，加锁保护），
+  odometry 与 TF 共用同一钳制后的时间戳。
+
+**进一步修复：odometry/TF 改为仅由 IMU 线程发布（2026-08-10）**：
+
+- 钳制解决了时间倒退，但暴露了第二个问题：IMU 线程和 lidar 线程都在发
+  odometry/TF，lidar 修正前后的位姿几乎同一时间戳发出，表现为
+  “瞬时跳变”（bag `fastlio_20260810_171537` 中 15~31cm 跳变 12 次），
+  会在地图里产生重影、放大闭合误差；
+- 修复：lidar 线程不再发布 odometry/TF（只更新地图/路径/点云），
+  lidar 修正后的位姿由下一个 IMU 样本（约 5ms）自然带出，延迟可忽略。
+
+## 2026-08-10 新增：2D BEV 占用栅格建图（bev_2d_mapper）
+
+目标：融合 lidar1(LIO) + lidar2(逐点 TF 补偿) -> 世界系鸟瞰占用栅格，
+直接输出 `nav_msgs/OccupancyGrid` 供导航使用，并附带 2D LaserScan。
+
+新增文件：
+
+- `rslidar_lio_adapter/scripts/bev_grid.py`：纯 numpy 栅格核心
+  （高度带滤波 -> 极坐标最近障碍 -> 射线填充 -> 占用/自由计数）；
+- `rslidar_lio_adapter/scripts/bev_2d_mapper.py`：ROS2 节点，
+  订阅 `/cloud_registered`(odom) + `/rslidar_points_2`(raw, 16 时间片
+  TF 补偿) + TF，输出 `/map`(world 系) 和 `/bev_scan`(base_link 系)；
+- `scripts/validate_bev_map.py`：离线 rosbag 验证脚本，输出 PGM/YAML/PNG。
+
+启动：`bash start_fastlio.sh rviz:=true bev_map:=true`（需要
+`dual_lidar:=true` 才包含 lidar2）。
+
+离线验证（bag `fastlio_20260810_163414`，879 帧，raw lidar1 + 16 时间片
+TF 补偿）：
+
+- 地图 2000x2000 @ 0.05m（±50m），占用 2.8k 格、自由 178k 格；
+- 结构合理：机器人沿北侧走廊移动，南侧大范围自由区，
+  墙体/障碍集中在距轨迹 3~24m；
+- 关键参数：高度带 0.05~1.8m（world 系），最小测距 0.6m
+  （滤掉球体自身表面），最大 30m，1440 个角度 bin。
+
+后续待办：
+
+- 实机录包验证（需录 `/cloud_registered` + `/rslidar_points_2` + TF）；
+- 调优高度带/最小测距/占用阈值；
+- 接入 nav2（costmap 直接用 `/map`）或 slam_toolbox（用 `/bev_scan`）。
+
 ## 一句话状态
 
 **方案A（单主雷达 rslidar_1 + IMU1 → FAST-LIO2）已实施并跑通**：XYZIRT 驱动 + 适配节点 +
@@ -94,12 +256,13 @@ spark-fast-lio 全链路稳定运行，odom ~60Hz、静止 116s 端到端漂移 
 ## 已知问题 / 注意
 
 - **坐标系约定（重要）**：spark-fast-lio 内部 map 帧 = 启动瞬间的 IMU/rslidar_1 系，
-  但 odom→base_link TF 按 base 系发布，两者不自洽。因此：
-  - `/cloud_registered` 名义 frame_id=odom，实际是 base 系数据（RViz 查看请用
-    `/cloud_registered_base`，配置已切换）；
+  但 odom→base_link TF 按 base 系发布。因此：
+  - `/cloud_registered` 是真 odom 系（2026-08-10 已修 header/数据一致），
+    但 `dense_publish_en=false` 时只有稀疏特征点；
+  - `/cloud_registered_base` 是 base 系稠密去畸变点云；
   - `/cloud_registered_body` 是 rslidar_1/IMU 系，TF 正确；
-  - 不要期望 LIO 输出点云与 `/rslidar_points_2` 原始点云在 RViz 中直接重合；
-    第二雷达正确做法是用 odom TF 把它变换到地图系（后续扩展节点）。
+  - 查看/建图统一用 `/merged_points`（odom 系融合点云），
+    lidar2 已由 `rslidar_points_2_processor_node` 按逐点 TF 补偿。
 - 通信中间件已统一为 **CycloneDDS**（`start_fastlio.sh` / `record_fastlio.sh` /
   launch 内设置 `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`），解决 Jetson 上 FastDDS
   发现时好时坏的问题。
@@ -108,8 +271,9 @@ spark-fast-lio 全链路稳定运行，odom ~60Hz、静止 116s 端到端漂移 
 - 已修复：主机 NTP 校时回跳会导致 IMU/点云时间戳倒退（FAST-LIO 报
   `IMU timestamps must be in ascending order!`）。驱动 `getTimeHost()` 已改为单调时钟
   （steady_clock + 首调时刻系统偏移），适配节点输出 IMU 时间戳再兜底保证递增。
-- 录制 bag 时**不要**同时录 `/cloud_registered` 等大点云话题，否则 rosbag2 写盘繁忙会让
-  IMU 消息丢包（reliable 队列溢出）；用 `record_fastlio.sh` 录制。
+- 录制 bag：LIO 验收用 `record_fastlio.sh`（**不录**大点云，防 IMU 丢包）；
+  融合验证用 `record_dual.sh`（会录 `/cloud_registered_base`、`/merged_points`、
+  `/merged_points_bev` 等大点云，磁盘繁忙时仍可能丢 IMU，仅验证用）。
 - 当前测试环境地面不水平/较杂乱，地面平面验收需在水平场地进行。
 - 若机器人初始姿态明显倾斜且需要 FAST-LIO 内部重力对齐，可设
   `gravity_alignment.enable_gravity_alignment: true` 并在启动后运动数秒。
