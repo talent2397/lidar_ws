@@ -51,6 +51,8 @@ bash start_fastlio.sh extrinsic_est:=true          # 在线标定 IMU-LiDAR 外�
 bash start_fastlio.sh dual_lidar:=true rviz:=true   # 双雷达：lidar2 处理 + 融合 + BEV
 bash record_fastlio.sh                             # 录制 LIO 验收 bag
 bash record_dual.sh                                # 录制双雷达融合验证 bag
+bash start_live_view.sh                            # 实车：边移动边看 WebGL 画面
+bash start_live_view.sh raw                        # 同上 + 原始 lidar1/2 点云
 ```
 
 离线回放已录 bag：
