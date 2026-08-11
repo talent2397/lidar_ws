@@ -21,6 +21,10 @@
   #     /rslidar_points_2_processed  (lidar2 逐点运动补偿, odom 系)
   #     /merged_points               (lidar1(LIO) + lidar2 融合, odom 系)
   #     /merged_points_bev           (融合点云 z 压平, BEV 鸟瞰视角)
+  # 浏览器 WebGL 可视化(不占机器人 CPU):
+  #   bash tools/install_foxglove_local.sh   # 免 sudo 装本地桥, 只需一次
+  #   bash start_web_view.sh                 # 实车: 启动桥 + 轻量降采样
+  #   bash play_bag.sh web                   # 回放: 播放 bag + 桥 + 浏览器
 """
 
 from launch import LaunchDescription

@@ -277,3 +277,49 @@ spark-fast-lio 全链路稳定运行，odom ~60Hz、静止 116s 端到端漂移 
 - 当前测试环境地面不水平/较杂乱，地面平面验收需在水平场地进行。
 - 若机器人初始姿态明显倾斜且需要 FAST-LIO 内部重力对齐，可设
   `gravity_alignment.enable_gravity_alignment: true` 并在启动后运动数秒。
+
+## 2026-08-11 浏览器 WebGL 可视化（Foxglove）✅ 已上线并验证
+
+**背景**：RViz 在 Jetson 上通过 llvmpipe 软渲染，Orin GPU 未启用，
+大点云（8~12 万点/帧）把 CPU 打满导致整机卡顿；已确认
+`DISPLAY=:1002` 为远程/虚拟显示，非 GPU 直通。
+
+**方案**：机器人端只跑“轻量降采样 + WebSocket 桥”，点云渲染全部移到
+浏览器端 WebGL（用调试电脑的 GPU），后续建图可视化走同一链路。
+
+### 已实现
+
+1. `pointcloud_lite_node`：`/merged_points`、`/merged_points_bev` →
+   VoxelGrid 0.1m + 限频 3Hz → `/merged_points_lite`、`/merged_points_bev_lite`；
+   实测 119,778 → **30,102 点**（约 1/4）。
+2. Foxglove 桥：`ros-humble-foxglove-bridge 3.4.3`（新 SDK 协议
+   `foxglove.sdk.v1`，老 `foxglove.websocket.v1` 会被 400 拒绝）。
+3. 免 sudo 安装：`tools/install_foxglove_local.sh` 下载 deb 并解包到
+   `tools/foxglove_bridge/`（二进制不入 git）。
+4. `web_view.launch.py`：两个轻量节点 + foxglove_bridge（端口 8765）。
+5. `play_bag.sh web / web-all`、`start_web_view.sh`：回放/实车一键浏览器观看。
+
+### 端到端验证（bag `dual_fusion_20260811_152708`）
+
+- WebSocket 握手成功（`foxglove.sdk.v1`）；
+- 桥自动广告 `/merged_points_lite` 等通道（cdr 编码）；
+- 订阅后持续收到 30k 点/帧（约 480KB/帧 CDR）@ ~3Hz，浏览器可流畅渲染；
+- 回放进程全部正常退出，无残留。
+
+### 使用
+
+```bash
+bash tools/install_foxglove_local.sh
+bash play_bag.sh web        # 回放最新 bag（轻量话题）
+bash play_bag.sh web-all    # 同上 + 原始 lidar1/2 点云
+bash start_web_view.sh      # 实车：只起桥 + 轻量节点
+```
+
+浏览器打开 https://app.foxglove.dev → 连接 `ws://<机器人IP>:8765`。
+
+### 下一步
+
+- 给 Foxglove 做一个默认布局（.json 导入），预设好俯视/侧视相机与点云配色；
+- 实车长时间观察 CPU：预计显示侧 CPU 占用显著下降；若仍高，
+  再评估 `point_filter_num`（4→6）或缩短融合帧率；
+- 后续建图/地图可视化直接复用 `web_view.launch.py` 加地图话题即可。

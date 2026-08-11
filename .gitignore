@@ -16,3 +16,6 @@ __pycache__/
 # 临时文件
 *.log
 *.pcd
+
+# 本地免 sudo 安装的 foxglove 桥 (二进制, 用 install 脚本重新生成)
+tools/foxglove_bridge/
