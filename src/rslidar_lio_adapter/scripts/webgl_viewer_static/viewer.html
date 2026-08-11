@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>LiDAR WebGL Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; font-family: "Microsoft YaHei", sans-serif; }
+  #viewer { display: block; width: 100%; height: 100%; }
+  #panel {
+    position: absolute; top: 12px; left: 12px; width: 240px;
+    background: rgba(20,24,32,.88); color: #ddd; border-radius: 8px;
+    padding: 10px 12px; font-size: 13px; user-select: none; z-index: 10;
+  }
+  #panel h1 { font-size: 14px; margin: 0 0 8px; color: #7fd0ff; }
+  #topics { margin-bottom: 8px; }
+  #topics label { display: block; padding: 2px 0; cursor: pointer; }
+  #topics input { margin-right: 6px; vertical-align: middle; }
+  .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  .row input[type=range] { flex: 1; }
+  button {
+    background: #2b6cb0; color: #fff; border: 0; border-radius: 4px;
+    padding: 5px 8px; margin: 2px; cursor: pointer; font-size: 12px;
+  }
+  button:hover { background: #3182ce; }
+  #status { position: absolute; top: 12px; right: 12px; padding: 5px 10px;
+    border-radius: 5px; font-size: 12px; background: rgba(20,24,32,.85); z-index: 10; }
+  #status .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .ok .dot { background: #4ade80; } .bad .dot { background: #f87171; }
+  #fps { color: #9ca3af; }
+</style>
+</head>
+<body>
+<div id="viewer"></div>
+<div id="status" class="bad"><span class="dot"></span><span id="statText">连接中...</span><br><span id="fps"></span></div>
+<div id="panel">
+  <h1>LiDAR WebGL 查看器</h1>
+  <div id="topics">等待话题...</div>
+  <div class="row">点大小 <input id="size" type="range" min="1" max="20" step="0.5" value="4"><span id="sizeVal">4</span></div>
+  <div class="row">
+    <button id="btn3d">3D 视角</button>
+    <button id="btnBev">俯视 BEV</button>
+    <button id="btnReset">重置</button>
+  </div>
+  <div class="row"><label><input id="chkGrid" type="checkbox" checked> 地面网格</label></div>
+</div>
+
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script>
+const WS_PORT = 8898;
+const MAGIC = 'WPCB';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x111418);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 2000);
+camera.position.set(8, 10, 16);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.getElementById('viewer').appendChild(renderer.domElement);
+
+const grid = new THREE.GridHelper(60, 30, 0x667788, 0x334455);
+scene.add(grid);
+scene.add(new THREE.AxesHelper(2));
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+const views = {};     // topic -> {pts, checked}
+const topicIds = {};  // topic -> id
+let ws = null;
+let reconnectTimer = null;
+
+function ensureView(topic) {
+  if (views[topic]) return views[topic];
+  const geo = new THREE.BufferGeometry();
+  const mat = new THREE.PointsMaterial({
+    size: parseFloat(document.getElementById('size').value) * 0.01,
+    vertexColors: true,
+    sizeAttenuation: true,
+  });
+  const pts = new THREE.Points(geo, mat);
+  pts.name = topic;
+  pts.visible = false;
+  scene.add(pts);
+  views[topic] = { pts, geo, mat, checked: false, count: 0, seq: 0 };
+  return views[topic];
+}
+
+function parseFrame(buf) {
+  const dv = new DataView(buf);
+  if (dv.byteLength < 26) return null;
+  let magic = '';
+  for (let i = 0; i < 4; i++) magic += String.fromCharCode(dv.getUint8(i));
+  if (magic !== MAGIC) return null;
+  const tid = dv.getUint8(5);
+  const seq = Number(dv.getBigUint64(6, true));
+  const count = dv.getUint32(22, true);
+  if (26 + count * 16 !== dv.byteLength) return null;
+
+  const pos = new Float32Array(count * 3);
+  const inten = new Float32Array(count);
+  let off = 26;
+  for (let k = 0; k < count; k++) {
+    pos[k*3]   = dv.getFloat32(off, true);
+    pos[k*3+1] = dv.getFloat32(off+4, true);
+    pos[k*3+2] = dv.getFloat32(off+8, true);
+    inten[k]   = dv.getFloat32(off+12, true);
+    off += 16;
+  }
+  let minI = Infinity, maxI = -Infinity;
+  for (let k = 0; k < count; k++) {
+    if (inten[k] < minI) minI = inten[k];
+    if (inten[k] > maxI) maxI = inten[k];
+  }
+  const span = (maxI - minI) || 1;
+  const col = new Float32Array(count * 3);
+  const c = new THREE.Color();
+  for (let k = 0; k < count; k++) {
+    const t = Math.min(1, Math.max(0, (inten[k] - minI) / span));
+    c.setHSL(0.66 - 0.66 * t, 1.0, 0.45 + 0.25 * t);  // 蓝 -> 红
+    col[k*3] = c.r; col[k*3+1] = c.g; col[k*3+2] = c.b;
+  }
+  return { tid, seq, count, pos, col };
+}
+
+function applyFrame(topic, f) {
+  const v = ensureView(topic);
+  if (f.seq <= v.seq) return;
+  v.seq = f.seq;
+  v.count = f.count;
+  v.geo.setAttribute('position', new THREE.BufferAttribute(f.pos, 3));
+  v.geo.setAttribute('color', new THREE.BufferAttribute(f.col, 3));
+  v.geo.computeBoundingSphere();
+  v.pts.visible = v.checked;
+}
+
+function subscribe() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const topics = Object.keys(views).filter(t => views[t].checked);
+  ws.send(JSON.stringify({ op: 'sub', topics }));
+}
+
+function buildTopicList(list) {
+  topicIds.length = 0;
+  const box = document.getElementById('topics');
+  box.innerHTML = '';
+  for (const t of list) {
+    topicIds[t.id] = t.name;
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = t.name.includes('_lite');
+    cb.onchange = () => {
+      views[t.name].checked = cb.checked;
+      views[t.name].pts.visible = cb.checked;
+      subscribe();
+    };
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(t.name));
+    box.appendChild(label);
+    const v = ensureView(t.name);
+    v.checked = cb.checked;
+    v.pts.visible = cb.checked;
+  }
+  subscribe();
+}
+
+function connect() {
+  clearTimeout(reconnectTimer);
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.hostname}:${WS_PORT}`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => {
+    document.getElementById('status').className = 'ok';
+    document.getElementById('statText').textContent = '已连接';
+  };
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === 'string') {
+      try {
+        const obj = JSON.parse(ev.data);
+        if (obj.op === 'hello') buildTopicList(obj.topics);
+      } catch (_) { /* ignore */ }
+      return;
+    }
+    const f = parseFrame(ev.data);
+    if (!f) return;
+    const topic = Object.keys(topicIds).find(id => Number(id) === f.tid);
+    if (topic) applyFrame(topicIds[topic], f);
+  };
+  ws.onclose = () => {
+    document.getElementById('status').className = 'bad';
+    document.getElementById('statText').textContent = '已断开，重连中...';
+    reconnectTimer = setTimeout(connect, 1000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function setView(mode) {
+  if (mode === 'bev') {
+    camera.up.set(0, 0, -1);
+    camera.position.set(0, 40, 0.01);
+    camera.lookAt(0, 0, 0);
+  } else {
+    camera.up.set(0, 1, 0);
+    camera.position.set(8, 10, 16);
+    camera.lookAt(0, 0, 0);
+  }
+  controls.update();
+}
+
+document.getElementById('btn3d').onclick = () => setView('3d');
+document.getElementById('btnBev').onclick = () => setView('bev');
+document.getElementById('btnReset').onclick = () => setView('3d');
+document.getElementById('chkGrid').onchange = (e) => grid.visible = e.target.checked;
+const sizeSlider = document.getElementById('size');
+const sizeVal = document.getElementById('sizeVal');
+sizeSlider.oninput = () => {
+  sizeVal.textContent = sizeSlider.value;
+  for (const t of Object.keys(views)) views[t].mat.size = parseFloat(sizeSlider.value) * 0.01;
+};
+
+let frameCount = 0, fpsTime = performance.now(), lastTotal = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  frameCount++;
+  const now = performance.now();
+  if (now - fpsTime >= 1000) {
+    let total = 0;
+    for (const t of Object.keys(views)) if (views[t].checked) total += views[t].count;
+    document.getElementById('fps').textContent =
+      `${frameCount} FPS | ${(total/1000).toFixed(1)}k 点`;
+    frameCount = 0; fpsTime = now; lastTotal = total;
+  }
+}
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+connect();
+animate();
+</script>
+</body>
+</html>

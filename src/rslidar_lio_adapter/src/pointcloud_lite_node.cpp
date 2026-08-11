@@ -1,7 +1,7 @@
 // pointcloud_lite_node.cpp
 // 轻量显示降采样节点:
 //   大点云(融合/BEV) -> VoxelGrid 体素降采样 -> 限频发布
-//   给 RViz / Foxglove 浏览器显示, 大幅降低 Jetson CPU / 网络带宽
+//   给 RViz / 浏览器 WebGL 显示, 大幅降低 Jetson CPU / 网络带宽
 //
 // 典型用法 (web_view.launch.py 中会同时起两个实例):
 //   /merged_points      -> /merged_points_lite      (0.1m, ~3Hz)

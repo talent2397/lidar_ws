@@ -5,9 +5,9 @@
 #  默认自动播放 bags/ 下最新的 bag (任意命名, 按修改时间)
 #  默认只播观看所需话题 (融合/BEV/TF), 流畅不卡;
 #  加 all 则播 bag 里全部话题 (含原始点云, 数据量大, 会明显变卡)
-#  加 web 则启动 Foxglove 桥 + 轻量降采样, 用浏览器 WebGL 观看
+#  加 web 则启动自建 WebGL 查看器, 浏览器观看 (免费, 无需账号)
 #  加 web-all 则浏览器观看的同时补播原始 lidar1/lidar2 点云 (负载更高)
-#  RViz 使用 fastlio_a.rviz (原始点云 + 融合 + BEV, 俯视视角)
+#  light 模式 RViz 使用 fastlio_a.rviz (原始点云 + 融合 + BEV, 俯视视角)
 # ==========================================
 
 BAGS_DIR="/home/wz/lidar_0804/bags"
@@ -49,25 +49,19 @@ cleanup() {
 trap cleanup EXIT
 
 if [ "$MODE" = "web" ] || [ "$MODE" = "web-all" ]; then
-    FG_ROOT="/home/wz/lidar_0804/tools/foxglove_bridge/rootfs"
-    if [ ! -f "$FG_ROOT/opt/ros/humble/lib/foxglove_bridge/foxglove_bridge" ]; then
-        echo "缺少本地 foxglove 桥, 请先运行: bash tools/install_foxglove_local.sh"
-        exit 1
-    fi
-    export AMENT_PREFIX_PATH="$FG_ROOT/opt/ros/humble:$AMENT_PREFIX_PATH"
-    export LD_LIBRARY_PATH="$FG_ROOT/opt/ros/humble/lib:$LD_LIBRARY_PATH"
-
     HOST_IP=$(hostname -I | awk '{print $1}')
-    echo "模式: $MODE (Foxglove 浏览器 WebGL 观看)"
-    echo "浏览器打开 https://app.foxglove.dev, 连接 ws://${HOST_IP}:8765"
+    echo "模式: $MODE (自建 WebGL 浏览器观看, 免费)"
+    echo "浏览器打开 http://${HOST_IP}:8899"
     if [ "$MODE" = "web-all" ]; then
-        echo "播放: 融合/BEV/TF + 原始 lidar1/lidar2 + lidar2 补偿 (负载较高)"
+        echo "播放: 融合/BEV/TF + 原始 lidar1/lidar2 (浏览器看降采样版, 负载较高)"
         WEB_TOPICS="/merged_points /merged_points_bev /path /tf /tf_static /odometry /rslidar_points_1 /rslidar_points_2 /rslidar_points_2_processed /cloud_registered_base"
+        WEB_ARGS="raw_lite:=true topics:=/merged_points_lite,/merged_points_bev_lite,/rslidar_points_1_lite,/rslidar_points_2_lite"
     else
         echo "播放轻量话题: 融合/BEV -> 浏览器显示降采样版 + 原始融合/BEV + TF"
         WEB_TOPICS="/merged_points /merged_points_bev /path /tf /tf_static /odometry"
+        WEB_ARGS=""
     fi
-    ros2 launch rslidar_lio_adapter web_view.launch.py use_sim_time:=true \
+    ros2 launch rslidar_lio_adapter web_view.launch.py use_sim_time:=true $WEB_ARGS \
         >/tmp/web_view.log 2>&1 &
     WEB_PID=$!
     sleep 4

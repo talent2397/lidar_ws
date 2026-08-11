@@ -61,6 +61,11 @@ install(TARGETS dual_lidar_fusion_node
 install(TARGETS pointcloud_lite_node
   DESTINATION lib/${PROJECT_NAME})
 
+install(PROGRAMS scripts/webgl_view_server_node.py
+  DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY scripts/webgl_viewer_static
+  DESTINATION share/${PROJECT_NAME})
+
 install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME})
 

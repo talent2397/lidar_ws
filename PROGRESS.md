@@ -278,48 +278,53 @@ spark-fast-lio 全链路稳定运行，odom ~60Hz、静止 116s 端到端漂移 
 - 若机器人初始姿态明显倾斜且需要 FAST-LIO 内部重力对齐，可设
   `gravity_alignment.enable_gravity_alignment: true` 并在启动后运动数秒。
 
-## 2026-08-11 浏览器 WebGL 可视化（Foxglove）✅ 已上线并验证
+## 2026-08-11 浏览器 WebGL 可视化（自建查看器）✅ 已上线并验证
 
 **背景**：RViz 在 Jetson 上通过 llvmpipe 软渲染，Orin GPU 未启用，
 大点云（8~12 万点/帧）把 CPU 打满导致整机卡顿；已确认
 `DISPLAY=:1002` 为远程/虚拟显示，非 GPU 直通。
+用户反馈 Foxglove 网页版需要登录/付费套餐，因此**不依赖任何第三方平台**，
+改为项目自带的 three.js 查看器。
 
 **方案**：机器人端只跑“轻量降采样 + WebSocket 桥”，点云渲染全部移到
-浏览器端 WebGL（用调试电脑的 GPU），后续建图可视化走同一链路。
+浏览器端 WebGL（用调试电脑的 GPU），后续建图可视化走同一链路；
+页面和流服务都是自建代码，零账号零会员。
 
 ### 已实现
 
 1. `pointcloud_lite_node`：`/merged_points`、`/merged_points_bev` →
    VoxelGrid 0.1m + 限频 3Hz → `/merged_points_lite`、`/merged_points_bev_lite`；
    实测 119,778 → **30,102 点**（约 1/4）。
-2. Foxglove 桥：`ros-humble-foxglove-bridge 3.4.3`（新 SDK 协议
-   `foxglove.sdk.v1`，老 `foxglove.websocket.v1` 会被 400 拒绝）。
-3. 免 sudo 安装：`tools/install_foxglove_local.sh` 下载 deb 并解包到
-   `tools/foxglove_bridge/`（二进制不入 git）。
-4. `web_view.launch.py`：两个轻量节点 + foxglove_bridge（端口 8765）。
+2. `webgl_view_server_node.py`：订阅轻量点云 → 紧凑二进制帧（WPCB，
+   x/y/z/intensity float32）→ WebSocket(8898) 推流；HTTP(8899) 提供页面。
+3. `viewer.html`：three.js WebGL 页面，支持话题开关、点大小、
+   3D/俯视 BEV 切换、强度配色、FPS 显示；three.js 已本地化，离线可用。
+4. `web_view.launch.py`：两个轻量节点 + 查看服务；`raw_lite:=true` 时
+   额外生成原始 lidar1/2 降采样版（0.2m / 2Hz）。
 5. `play_bag.sh web / web-all`、`start_web_view.sh`：回放/实车一键浏览器观看。
 
 ### 端到端验证（bag `dual_fusion_20260811_152708`）
 
-- WebSocket 握手成功（`foxglove.sdk.v1`）；
-- 桥自动广告 `/merged_points_lite` 等通道（cdr 编码）；
-- 订阅后持续收到 30k 点/帧（约 480KB/帧 CDR）@ ~3Hz，浏览器可流畅渲染；
+- HTTP 页面正常加载（/、viewer.html、three.min.js、OrbitControls.js 均 200）；
+- `web` 模式：WS 收到 `/merged_points_lite` 30,367 点/帧、
+  `/merged_points_bev_lite` 12,357 点/帧，均 ~2-3Hz；
+- `web-all` 模式：额外收到 `/rslidar_points_1_lite`（5,110 点）、
+  `/rslidar_points_2_lite`（9,605 点），四路话题同时推流正常；
 - 回放进程全部正常退出，无残留。
 
 ### 使用
 
 ```bash
-bash tools/install_foxglove_local.sh
 bash play_bag.sh web        # 回放最新 bag（轻量话题）
 bash play_bag.sh web-all    # 同上 + 原始 lidar1/2 点云
-bash start_web_view.sh      # 实车：只起桥 + 轻量节点
+bash start_web_view.sh      # 实车：只起查看服务
 ```
 
-浏览器打开 https://app.foxglove.dev → 连接 `ws://<机器人IP>:8765`。
+浏览器打开 http://<机器人IP>:8899。
 
 ### 下一步
 
-- 给 Foxglove 做一个默认布局（.json 导入），预设好俯视/侧视相机与点云配色；
+- 查看器按需加“跟随机器人/轨迹显示/地图叠加”；
 - 实车长时间观察 CPU：预计显示侧 CPU 占用显著下降；若仍高，
   再评估 `point_filter_num`（4→6）或缩短融合帧率；
 - 后续建图/地图可视化直接复用 `web_view.launch.py` 加地图话题即可。

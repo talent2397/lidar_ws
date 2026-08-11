@@ -3,7 +3,7 @@
 > **状态（2026-08-11）**：FAST-LIO2 方案A 已上线并通过运动验收 ——
 > 静止 116s 漂移 0.27cm、运动往返闭合 13.25cm、odom ~60-100Hz、点云无断流；
 > lidar2 逐点补偿 + 双雷达融合 + BEV 视角已上线（`dual_lidar:=true`）；
-> 浏览器 WebGL 可视化已上线（Foxglove 桥 + 轻量降采样，点云渲染不占机器人 CPU）；
+> 浏览器 WebGL 可视化已上线（自建查看器 + 轻量降采样，免费无需账号，渲染不占机器人 CPU）；
 > 2D 占用栅格建图代码已按需移除。
 > 旧融合方案（动态补偿 v3 + C++ 融合节点，静止 0.06% / 运动 0.24% 穿透）保留可回退。
 
@@ -72,25 +72,26 @@ ros2 bag play bags/fastlio_<时间戳> --clock --topics /rslidar_points_1 /rslid
 - TF：`world → odom → base_link → rslidar_1/2`（world→odom 由 world_anchor 按 IMU 初始姿态生成）
 - `src/spark-fast-lio/spark_fast_lio/PCD/scans_*.pcd`（`save_map:=true` 时）
 
-## 浏览器 WebGL 可视化（推荐，解决 RViz 卡顿）
+## 浏览器 WebGL 可视化（推荐，解决 RViz 卡顿，免费无需账号）
 
 机器人端不再依赖 RViz 软渲染（Jetson 上 RViz 走 llvmpipe，Orin GPU 用不上），
-点云通过 WebSocket 推到浏览器，由**调试电脑的 GPU（WebGL）**负责渲染：
+点云通过 WebSocket 推到浏览器，由**调试电脑的 GPU（WebGL）**负责渲染；
+页面是项目自带的 three.js 查看器，不需要 Foxglove / 任何账号会员：
 
 ```bash
-bash tools/install_foxglove_local.sh   # 免 sudo 安装本地桥（只需一次）
 bash play_bag.sh web                   # 回放最新 bag + 浏览器观看（轻量话题）
 bash play_bag.sh web-all               # 回放 + 浏览器观看 + 原始 lidar1/2 点云
-bash start_web_view.sh                 # 实车运行：只启动桥 + 轻量降采样
+bash start_web_view.sh                 # 实车运行：启动轻量降采样 + 查看服务
 ```
 
-- 浏览器打开 https://app.foxglove.dev，连接 `ws://<机器人IP>:8765`
-  （脚本启动时会打印 IP；同网段需放行 8765 端口）
+- 浏览器打开 http://<机器人IP>:8899（脚本启动时会打印地址；
+  同网段需放行 8899/8898 端口），页面里可直接切换 3D/俯视 BEV、点大小、话题开关
 - 显示话题：
   - `/merged_points_lite`、`/merged_points_bev_lite`：融合/BEV 的
     VoxelGrid 降采样版（0.1m，约 3 万点 / 3Hz，默认显示，不占带宽）；
   - `/merged_points`、`/merged_points_bev`：原始融合/BEV 点云；
-  - `/rslidar_points_1`、`/rslidar_points_2`：原始雷达点云（`web-all` 模式）；
+  - `/rslidar_points_1_lite`、`/rslidar_points_2_lite`：原始雷达点云的
+    降采样版（0.2m / 2Hz，`web-all` 模式）；
   - `/path`、`/odometry`、`/tf`：里程计与 TF。
 - 轻量话题由 `pointcloud_lite_node` 实时生成，不写入 bag；
   RViz 仍保留作为本机备用查看方式（`bash play_bag.sh`）。
