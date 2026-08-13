@@ -1,0 +1,15 @@
+note: "\u624B\u52A8\u8C03\u8BD5\u6807\u5B9A\u7ED3\u679C"
+rslidar_1:
+  pitch: 0.0033
+  roll: -1.5946
+  x: 0.0
+  y: 0.007
+  yaw: -3.1147
+  z: 0.0693
+rslidar_2:
+  pitch: -0.0096
+  roll: -1.5412
+  x: 0.057
+  y: 0.0069
+  yaw: 0.0301
+  z: 0.0482

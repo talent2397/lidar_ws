@@ -10,7 +10,7 @@
   suspension:=true 启用悬挂补偿节点 (默认关闭, 当前补偿算法会引入漂移)
 
 不启动 RViz — 如需可视化，用:
-  rviz2 -d /home/wz/lidar_0804/src/spherical_robot_description/rviz/dual_lidar_calib.rviz
+  rviz2 -d /home/wz/lidar_ws/src/spherical_robot_description/rviz/dual_lidar_calib.rviz
 """
 
 import os, subprocess, sys

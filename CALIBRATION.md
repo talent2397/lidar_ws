@@ -1,7 +1,7 @@
 # 双 RoboSense Airy LiDAR 标定与融合文档
 
-> **版本**: v10 (Stable, 地面平面自动标定 + 动态补偿)
-> **日期**: 2026-08-04
+> **版本**: v11 (2026-08-13, 低速地面共面 + 竖直面/ICP 离线标定)
+> **日期**: 2026-08-13
 > **平台**: NVIDIA Jetson ARM64 / Ubuntu 22.04 / ROS 2 Humble
 
 ---
@@ -19,6 +19,20 @@
 | 运动穿透（点<-0.2m） | 8.3%（静态 TF） | 0.75%（离线验证） |
 
 ---
+
+## 0.1 v10 → v11 变更
+
+| 项目 | v10 | v11（2026-08-13） |
+|------|------|------|
+| 标定方法 | 地面平面自动标定 | 手动调参 + 低速地面共面 / 竖直面多平面 / 离线 ICP |
+| rslidar_2 xyz | `(-0.05, -0.137, 0.1032)` | **`(0.057, 0.0069, 0.0482)`** |
+| rslidar_2 rpy | `(-1.4142, -0.0231, 0.0238)` | **`(-1.5412, -0.0096, 0.0301)`** |
+| rslidar_1 | 不变 | 不变 |
+| 离线标定脚本 | 无 | `calibrate_ground_coplanar.py` / `calibrate_planes_offline.py` / `calibrate_icp_offline.py` |
+| 结果 | 102121 静止 0.06% / 运动 0.24% | 低速/静止最底端对齐；左右 Y 仍有残余待压 |
+
+> 08-13 最终外参已写入 `urdf/spherical_robot.urdf` 和
+> `scripts/suspension_compensator.py`，并已 `colcon build`。
 
 ## 1. 系统概述
 
@@ -111,21 +125,23 @@ point_cloud_fusion (TF2 → world, 按到达时刻回查 TF, 50ms 同步, 拼接
 
 | 参数 | 值 | 单位 |
 |------|:--:|------|
-| x | -0.05 | m |
-| y | -0.137 | m |
-| z | 0.1032 | m |
-| roll | -1.4142 | rad |
-| pitch | -0.0231 | rad |
-| yaw | 0.0238 | rad |
+| x | 0.057 | m |
+| y | 0.0069 | m |
+| z | 0.0482 | m |
+| roll | -1.5412 | rad |
+| pitch | -0.0096 | rad |
+| yaw | 0.0301 | rad |
 
 ### 2.3 外参含义
 
 - z 值 = 雷达实际安装高度 − 球心离地 0.345m（球半径）：
   - rslidar_1：总高 0.4143 m → z = 0.0693 m
-  - rslidar_2：总高 0.4482 m → z = 0.1032 m
+  - rslidar_2（08-13 生效值）：总高 0.3932 m → z = 0.0482 m
 - 总高由地面平面标定实测；2026-08-05 将球心高度从错误的 0.395m 修正为
   0.345m（= 球半径），两雷达 z 同步 +0.05m，合成总高不变，点云输出不变。
-- 该组参数由 **地面平面自动标定** 得到（见 §5.4），与 IMU 重力方向交叉验证一致。
+- v10 参数由 **地面平面自动标定** 得到（见 §7.3），与 IMU 重力方向交叉验证一致；
+- 08-13 在此基础上经手动 + 离线共面标定确认（见 §7.3b），rslidar_2 的 x/y/z
+  发生较大调整，当前以本节为准。
 
 ### 2.4 精度评估
 
@@ -135,6 +151,7 @@ point_cloud_fusion (TF2 → world, 按到达时刻回查 TF, 50ms 同步, 拼接
 | 精标定 | 两阶段 ICP（Y 轴锁定） | ±5-7 cm (RMSE 0.061m) |
 | 地面平面标定 (v10) | 静止段点云拟合地面 | 静止倾斜 **0.39°**，offset 3mm |
 | 动态补偿验证 (v10) | 运动前后 IMU 重力方向 | 补偿后姿态偏差收敛至 **~0.6°** |
+| 08-13 手动 + 离线共面 (v11) | 低速/静止帧地面共面优化 | 最底端对齐；左右 Y 残余待压 |
 
 最终实测（20260805_102121 bag）：静止段 0.06% 的点 z<-0.2m，
 运动段 0.24%（对比静态 TF 的 8.3%），输出 4.43Hz，地面全程水平（倾斜 <0.4°）。
@@ -251,6 +268,9 @@ src/spherical_robot_description/
 | `scripts/tune_calibration.py` | 手动粗标定 — 键盘实时调 6DOF |
 | `scripts/calibrate_lidars.py` | ICP 精标定 — Y 轴锁定两阶段配准 |
 | `scripts/analyze_bag_z.py` | rosbag 穿透统计（z_min/z_p1/z_median） |
+| `scripts/calibrate_ground_coplanar.py` | 08-13 低速地面共面优化（`--dof rpz/full`，默认只调 roll/pitch/z） |
+| `scripts/calibrate_planes_offline.py` | 地面 + 竖直面多平面联合标定（`--dof lateral/full`） |
+| `scripts/calibrate_icp_offline.py` | 离线 6DoF ICP（重叠区，容易局部最优，需人工确认） |
 
 ---
 
@@ -259,7 +279,7 @@ src/spherical_robot_description/
 ### 6.1 一键启动（静态外参）
 
 ```bash
-bash /home/wz/lidar_0804/start_lidar.sh
+bash /home/wz/lidar_ws/start_lidar.sh
 ```
 
 输出：`/merged_points` (PointCloud2 × XYZI, frame_id=`world`, 地面 z=0)
@@ -267,37 +287,37 @@ bash /home/wz/lidar_0804/start_lidar.sh
 ### 6.2 带动态补偿
 
 ```bash
-bash /home/wz/lidar_0804/start_lidar.sh suspension:=true
+bash /home/wz/lidar_ws/start_lidar.sh suspension:=true
 ```
 
 ### 6.3 带 RViz
 
 ```bash
-bash /home/wz/lidar_0804/start_lidar.sh rviz:=true
+bash /home/wz/lidar_ws/start_lidar.sh rviz:=true
 ```
 
 ### 6.4 录制 rosbag
 
 ```bash
-bash /home/wz/lidar_0804/record_bag.sh
+bash /home/wz/lidar_ws/record_bag.sh
 ```
 
 录制话题：`/rslidar_points_1` `/2` `/merged_points` `/rslidar_imu_data_1` `/2` `/tf` `/tf_static`
 
 - 若 sqlite 启动即崩溃（ROS2 Humble 已知 bug #1971），脚本会自动重试并保留残包到 `bags/_broken/`；
-- 保存位置：`~/lidar_0804/bags/dual_lidar_年月日_时分秒/`；
+- 保存位置：`~/lidar_ws/bags/dual_lidar_年月日_时分秒/`；
 - 推荐流程：静止 30s → 移动 30s → 静止 30s。
 
 ### 6.5 播放 rosbag + RViz
 
 ```bash
-bash /home/wz/lidar_0804/play_bag.sh [bag路径]
+bash /home/wz/lidar_ws/play_bag.sh [bag路径]
 ```
 
 ### 6.6 验证
 
 ```bash
-source /home/wz/lidar_0804/install/setup.bash
+source /home/wz/lidar_ws/install/setup.bash
 
 ros2 topic hz /merged_points          # ~10Hz
 ros2 topic echo /merged_points --field header --once   # frame_id: world
@@ -314,14 +334,14 @@ ros2 run tf2_ros tf2_echo world base_link   # Translation [0, 0, 0.345]
 
 ```bash
 # 终端 1: 雷达驱动
-source /home/wz/lidar_0804/install/setup.bash
+source /home/wz/lidar_ws/install/setup.bash
 ros2 run rslidar_sdk rslidar_sdk_node
 
 # 终端 2: 调参工具
-python3 /home/wz/lidar_0804/scripts/tune_calibration.py
+python3 /home/wz/lidar_ws/scripts/tune_calibration.py
 
 # 终端 3: RViz
-rviz2 -d /home/wz/lidar_0804/src/spherical_robot_description/rviz/dual_lidar_calib.rviz
+rviz2 -d /home/wz/lidar_ws/src/spherical_robot_description/rviz/dual_lidar_calib.rviz
 ```
 
 | 按键 | 功能 |
@@ -337,7 +357,7 @@ rviz2 -d /home/wz/lidar_0804/src/spherical_robot_description/rviz/dual_lidar_cal
 ### 7.2 精标定（ICP, Y 轴锁定）
 
 ```bash
-python3 /home/wz/lidar_0804/scripts/calibrate_lidars.py --frames 200
+python3 /home/wz/lidar_ws/scripts/calibrate_lidars.py --frames 200
 ```
 
 | 参数 | 默认值 | 含义 |
@@ -370,12 +390,33 @@ tilt = atan(√(a²+b²))
 | rslidar_1 | z = -0.0782x - 0.1883y - 0.0065 | 11.52° |
 | rslidar_2 | z = -0.0796x - 0.2121y - 0.0776 | 12.76° |
 
+### 7.3b 08-13 低速共面 / 竖直面离线标定（v11）
+
+地面共面只能稳定约束 roll/pitch/z，左右 Y 和 yaw 需要障碍物/竖直面特征：
+
+```bash
+# 1) 低速帧地面共面：默认只优化 rpz，快速消除高度/姿态差
+python3 scripts/calibrate_ground_coplanar.py \
+    --bag bags/dual_lidar_20260813_160447 --dof rpz
+
+# 2) 竖直面多平面：地面 + 箱体/墙侧面联合，压 x/y/yaw
+python3 scripts/calibrate_planes_offline.py \
+    --bag bags/dual_lidar_20260813_140142_r2 --dof lateral
+
+# 3) 离线 ICP：重叠区 6DoF，适合有共同障碍物的 bag
+python3 scripts/calibrate_icp_offline.py \
+    --bag bags/dual_lidar_20260813_133316_r2
+```
+
+三个脚本都只输出建议值，不修改 URDF / 补偿器。确认视觉对齐后，
+再按 §7.4 写入并重新构建。
+
 ### 7.4 应用标定
 
 更新 URDF 后重新构建：
 
 ```bash
-cd /home/wz/lidar_0804
+cd /home/wz/lidar_ws
 colcon build --symlink-install
 ```
 
@@ -409,6 +450,8 @@ colcon build --symlink-install
 | 运动时点云残余畸变 | 0.1s 扫描周期 + 无逐点时间戳 | ⚠️ fusion v2 已降至 0.75% |
 | 动态补偿 yaw 漂移 | 加速度计无法观测 yaw | ⚠️ 需磁力计/点云特征 |
 | z 回弹补偿不完全 | 泄漏双积分对持续压缩跟踪有限 | ⚠️ 需实测调参 |
+| 左右 Y / yaw 残余 | 双雷达侧装、重叠区窄，地面共面不约束 x/y/yaw | ⚠️ v11 竖直面/ICP 继续标 |
+| 机械臂 / MoveIt TF 冲突 | lidar_ws 与机械臂各发布一个 `base_link` | ⚠️ 运行前停机械臂或换 `ROS_DOMAIN_ID` |
 | rosbag2 sqlite 启动崩溃 | Humble 0.15.16 已知 bug #1971 | ✅ 脚本自动重试 |
 | Y 重叠区仅 60cm | 球体安装位置限制 | ⚠️ ICP 无法约束 Y |
 | PTP 无法启用 | Jetson eno1 网卡不支持硬件时间戳 | ❌ 已尝试，不可行 |
@@ -457,7 +500,7 @@ FAST-LIO2 ← /rslidar_points_1 + /rslidar_imu_data_1
 ## 11. 构建命令
 
 ```bash
-cd /home/wz/lidar_0804
+cd /home/wz/lidar_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install --cmake-args '-DENABLE_IMU_DATA_PARSE=ON'
 ```

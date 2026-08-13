@@ -5,12 +5,12 @@
 #  自动把残包移到 _broken/ 并重试，最多重试 MAX_ATTEMPTS 次。
 # ==========================================
 
-BAG_DIR="${1:-/home/wz/lidar_0804/bags}"
+BAG_DIR="${1:-/home/wz/lidar_ws/bags}"
 BROKEN_DIR="$BAG_DIR/_broken"
 MAX_ATTEMPTS="${2:-5}"
 
 source /opt/ros/humble/setup.bash
-source /home/wz/lidar_0804/install/setup.bash
+source /home/wz/lidar_ws/install/setup.bash
 
 mkdir -p "$BAG_DIR" "$BROKEN_DIR"
 

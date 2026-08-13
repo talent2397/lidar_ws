@@ -2,7 +2,7 @@
 """Cross-reference ground penetration with IMU motion data"""
 import struct, sqlite3, numpy as np
 
-BAG = "/home/wz/lidar_0804/bags/dual_lidar_20260730_165017/dual_lidar_20260730_165017_0.db3"
+BAG = "/home/wz/lidar_ws/bags/dual_lidar_20260730_165017/dual_lidar_20260730_165017_0.db3"
 conn = sqlite3.connect(BAG)
 cursor = conn.execute("SELECT id, name FROM topics")
 topics = {row[1]: row[0] for row in cursor}

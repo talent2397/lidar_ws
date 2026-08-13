@@ -4,11 +4,11 @@
 #  用法: bash play_bag.sh [bag路径|bags目录]
 # ==========================================
 
-BAGS_DIR="/home/wz/lidar_0804/bags"
+BAGS_DIR="/home/wz/lidar_ws/bags"
 ARG="${1:-$BAGS_DIR}"
 
 source /opt/ros/humble/setup.bash
-source /home/wz/lidar_0804/install/setup.bash
+source /home/wz/lidar_ws/install/setup.bash
 
 # 如果传的是目录，找里面最新的 bag 子目录
 if [ -d "$ARG" ] && [ ! -f "$ARG/metadata.yaml" ]; then
@@ -33,6 +33,6 @@ BAG_PID=$!
 sleep 2
 
 # RViz
-rviz2 -d /home/wz/lidar_0804/src/spherical_robot_description/rviz/dual_lidar_calib.rviz
+rviz2 -d /home/wz/lidar_ws/src/spherical_robot_description/rviz/dual_lidar_calib.rviz
 
 kill $BAG_PID 2>/dev/null
