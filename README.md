@@ -1,8 +1,8 @@
-# 双 RoboSense Airy LiDAR 融合项目（旧融合链路 + 2026-08-13 共面标定）
+# 双 RoboSense Airy LiDAR 融合项目（旧融合链路 + 2026-08-13 运动地面对齐验证）
 
-> 状态（2026-08-13）：在旧融合链路（动态补偿 v3 + C++ 融合 + 球心 345mm）
-> 基础上完成低速双雷达共面标定。最终外参已写入 URDF / suspension_compensator
-> 并重新构建；低速/静止最底端已对齐，左右 Y 方向仍有残余偏差（已知待办）。
+> 状态（2026-08-13 晚）：在旧融合链路（动态补偿 v3 + C++ 融合 + 球心 345mm）
+> 基础上完成低速共面标定，并通过运动地面对齐验证（173447：运动段两雷达地面
+> 高度差 −3.0±6.5cm）。补偿器新增 IMU 缺帧容错。左右 Y 方向仍有残余偏差（已知待办）。
 
 ## 快速开始
 
@@ -21,6 +21,8 @@ bash play_bag.sh                                # 回放最新 dual_lidar_* bag 
 ```bash
 python3 scripts/live_z_monitor.py              # 实时 z 监控
 python3 scripts/analyze_merged_penetration.py  # 离线穿透分析（102121 口径）
+python3 scripts/analyze_ground_misalign.py \
+    --bag bags/dual_lidar_20260813_173447      # 两雷达逐帧地面平面偏差分析
 ```
 
 ## 2026-08-13 离线标定脚本（只输出结果，不改运行时）
