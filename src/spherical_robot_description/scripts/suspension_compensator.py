@@ -24,8 +24,10 @@ v3 相对 v2 的修改（2026-08-04，基于 161906 bag 实测）：
 
 import math
 import rclpy
+import numpy as np
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
+from sensor_msgs.msg import PointCloud2
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster
 
@@ -57,6 +59,20 @@ COAST_START   = 0.05  # IMU 无新样本超过该时长, 开始用最近角速�
 COAST_MAX_GAP = 1.0   # 外推最大时长 (s), 超过后保持姿态不再外推
 COAST_GATE    = 0.02  # 最近角速度低于该值不外推 (避免静止噪声被积分)
 GAP_WARN      = 0.3   # IMU 缺口超过该时长记录警告
+
+# ── 地面平面慢速反馈 (2026-08-14, 解决翻滚转弯底端共面) ──
+# 原理: 每个雷达用自己的点云拟合 world 地面平面, 把平面残差 (z0/roll/pitch)
+# 慢速 EMA 回灌到 TF, 保证两雷达底端落在同一平面上 (离线仿真: 171903 运动段
+# Δz0 从 -15.8±8.5cm 降到 -0.1±4.0cm)。z 泄漏双积分保留作地面不可见时的惯性兜底。
+FB_TAU            = 0.5     # EMA 时间常数 (s)
+FB_Z_MAX          = 0.20    # z 反馈修正限幅 (m)
+FB_ANGLE_MAX_DEG  = 10.0    # roll/pitch 反馈修正限幅 (deg)
+FB_MIN_INLIERS    = 300     # 地面拟合最少内点数
+FB_NORMAL_Z_MIN   = 0.90    # 地面法线接近竖直才采信
+FB_GROUND_H       = 0.25    # world 地面候选点高度阈值 (m)
+FB_MAX_PTS        = 3000    # 拟合最大点数 (超出降采样)
+FB_PC_STRIDE      = 4       # 点云抽稀步长 (降计算量)
+WORLD_BASE_Z      = 0.345   # world → base_link 高度 (球半径, 与 launch 一致)
 
 # ── URDF 标称值 (v9 + 2026-08-04 地面平面自动标定) ──
 URDF = {
@@ -201,12 +217,24 @@ class SuspensionCompensator(Node):
                 'last_w': None,          # 最近一次偏置扣除后的角速度 (用于外推)
                 'last_imu_wall': None,   # 最近一次 IMU 回调的墙钟时间 (s)
                 'last_gap_warn': 0.0,    # 上次缺口告警时间 (传感器时间 s)
+                # ── 地面平面慢速反馈 ──
+                'fb_z': 0.0,             # 垂直平移修正 (m, 世界系, 向上为正)
+                'fb_roll': 0.0,          # roll 修正 (rad, 世界/基座系)
+                'fb_pitch': 0.0,         # pitch 修正 (rad)
+                'fb_last_t': None,       # 上次反馈更新的墙钟时间 (s)
             }
 
         self.create_subscription(Imu, '/rslidar_imu_data_1',
                                   lambda m: self._cb(m, 'rslidar_1'), 50)
         self.create_subscription(Imu, '/rslidar_imu_data_2',
                                   lambda m: self._cb(m, 'rslidar_2'), 50)
+        # 地面反馈需要点云; 用可靠 QoS (驱动发布为 reliable)
+        self.create_subscription(PointCloud2, '/rslidar_points_1',
+                                 lambda m: self._cb_pc(m, 'rslidar_1'), 10)
+        self.create_subscription(PointCloud2, '/rslidar_points_2',
+                                 lambda m: self._cb_pc(m, 'rslidar_2'), 10)
+        self.declare_parameter('ground_feedback', True)
+        self.ground_feedback_enabled = self.get_parameter('ground_feedback').value
 
         self._tf_timer = self.create_timer(0.01, self._publish)
         self._log_timer = self.create_timer(2.0, self._log_status)
@@ -352,6 +380,112 @@ class SuspensionCompensator(Node):
                 st['z_disp'] = clamp(st['z_disp'], -Z_MAX, Z_MAX)
 
     # ── 定时发布 TF ────────────────────────────────────
+    def _pc_xyz(self, msg):
+        """把 PointCloud2 解成 (N,3) float64 数组."""
+        n = msg.width * msg.height
+        if n == 0 or msg.point_step < 12:
+            return None
+        arr = np.frombuffer(msg.data, dtype=np.uint8)
+        if len(arr) < n * msg.point_step:
+            return None
+        cols = {f.name: f.offset // 4 for f in msg.fields
+                if f.datatype == 7 and f.count == 1 and f.name in ('x', 'y', 'z')}
+        if not all(k in cols for k in ('x', 'y', 'z')):
+            return None
+        pts = np.frombuffer(msg.data, dtype=np.float32,
+                            count=n * msg.point_step // 4)
+        pts = pts.reshape(n, msg.point_step // 4)
+        out = pts[:, [cols['x'], cols['y'], cols['z']]].astype(np.float64)
+        out = out[::FB_PC_STRIDE]
+        return out[np.isfinite(out).all(axis=1)]
+
+    def _q_to_matrix(self, q):
+        x, y, z, w = q
+        return np.array([
+            [1 - 2*(y*y + z*z), 2*(x*y - z*w), 2*(x*z + y*w)],
+            [2*(x*y + z*w), 1 - 2*(x*x + z*z), 2*(y*z - x*w)],
+            [2*(x*z - y*w), 2*(y*z + x*w), 1 - 2*(x*x + y*y)],
+        ])
+
+    def _q_fb(self, st):
+        """反馈姿态修正 (世界/基座系, 左乘到 base→lidar 旋转上)."""
+        return euler_to_quat(st['fb_roll'], st['fb_pitch'], 0.0)
+
+    def _to_world(self, pts, st):
+        q_base = st['q_total'] or quat_multiply(st['q_nominal'], st['q_accum'])
+        q_full = quat_multiply(self._q_fb(st), q_base)
+        R = self._q_to_matrix(q_full)
+        p = pts @ R.T
+        p[:, 0] += st['tx']
+        p[:, 1] += st['ty']
+        p[:, 2] += st['tz'] + st['z_disp'] + st['fb_z'] + WORLD_BASE_Z
+        return p
+
+    def _fit_ground(self, pts):
+        """world 系地面平面拟合: 返回 (z0, roll_rad, pitch_rad, nin) 或 None."""
+        cand = pts[pts[:, 2] < FB_GROUND_H]
+        if len(cand) < FB_MIN_INLIERS:
+            return None
+        if len(cand) > FB_MAX_PTS:
+            step = len(cand) // FB_MAX_PTS
+            cand = cand[::step][:FB_MAX_PTS]
+
+        def plane(c):
+            center = c.mean(axis=0)
+            w, v = np.linalg.eigh(np.cov((c - center).T))
+            n = v[:, 0]
+            if n[2] < 0:
+                n = -n
+            return n, center
+
+        n, center = plane(cand)
+        if n[2] < 0.5:
+            return None
+        d = float(n @ center)
+        dist = np.abs(cand @ n - d)
+        inl = cand[dist < 0.03]
+        if len(inl) < FB_MIN_INLIERS:
+            return None
+        n, center = plane(inl)
+        if n[2] < FB_NORMAL_Z_MIN:
+            return None
+        d = float(n @ center)
+        z0 = d / n[2]
+        roll = math.atan2(-n[1], n[2])
+        pitch = math.atan2(n[0], n[2])
+        return z0, roll, pitch, len(inl)
+
+    def _cb_pc(self, msg, lid):
+        """地面平面慢速反馈: 用点云平面残差修正 TF 的 roll/pitch/z."""
+        if not self.ground_feedback_enabled:
+            return
+        st = self.state[lid]
+        pts = self._pc_xyz(msg)
+        if pts is None or len(pts) < FB_MIN_INLIERS:
+            st['fb_last_t'] = None
+            return
+        p = self._to_world(pts, st)
+        fit = self._fit_ground(p)
+        if fit is None:
+            st['fb_last_t'] = None
+            return
+        z0, roll, pitch, _ = fit
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if st['fb_last_t'] is None:
+            st['fb_last_t'] = now
+            return
+        dt = max(now - st['fb_last_t'], 0.001)
+        st['fb_last_t'] = now
+        alpha = dt / (FB_TAU + dt)
+        # 残差为负表示平面偏低 → fb_z 需要为正 (把 lidar 抬起来)
+        st['fb_z'] += alpha * (-z0)
+        st['fb_roll'] += alpha * (-roll)
+        st['fb_pitch'] += alpha * (-pitch)
+        st['fb_z'] = clamp(st['fb_z'], -FB_Z_MAX, FB_Z_MAX)
+        max_ang = math.radians(FB_ANGLE_MAX_DEG)
+        st['fb_roll'] = clamp(st['fb_roll'], -max_ang, max_ang)
+        st['fb_pitch'] = clamp(st['fb_pitch'], -max_ang, max_ang)
+
     def _publish(self):
         now = self.get_clock().now().to_msg()
         now_wall = now.sec + now.nanosec * 1e-9
@@ -370,6 +504,8 @@ class SuspensionCompensator(Node):
                     dq = [s*st['last_w'][0], s*st['last_w'][1],
                           s*st['last_w'][2], math.cos(half)]
                     q = quat_multiply(q, dq)
+            # 地面平面反馈 (世界/基座系, 左乘)
+            q = quat_multiply(self._q_fb(st), q)
 
             tf = TransformStamped()
             tf.header.stamp = now
@@ -377,7 +513,7 @@ class SuspensionCompensator(Node):
             tf.child_frame_id = lid
             tf.transform.translation.x = st['tx']
             tf.transform.translation.y = st['ty']
-            tf.transform.translation.z = st['tz'] + st['z_disp']
+            tf.transform.translation.z = st['tz'] + st['z_disp'] + st['fb_z']
             tf.transform.rotation.x = q[0]
             tf.transform.rotation.y = q[1]
             tf.transform.rotation.z = q[2]
@@ -395,6 +531,9 @@ class SuspensionCompensator(Node):
             self.get_logger().info(
                 f'{lid}: [{state_str}] drift={dev_deg:.1f}° '
                 f'bias|ω|={bias_mag:.4f} z={st["z_disp"]*100:+.1f}cm '
+                f'fb_z={st["fb_z"]*100:+.1f}cm '
+                f'fb_rp=({math.degrees(st["fb_roll"]):+.1f},'
+                f'{math.degrees(st["fb_pitch"]):+.1f})° '
                 f'rest_t={st["rest_t"]:.1f}s',
                 throttle_duration_sec=5)
 

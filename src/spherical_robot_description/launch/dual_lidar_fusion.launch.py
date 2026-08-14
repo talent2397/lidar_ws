@@ -58,6 +58,7 @@ def generate_launch_description():
 
     rviz_arg = DeclareLaunchArgument('rviz', default_value='false')
     suspension_arg = DeclareLaunchArgument('suspension', default_value='false')
+    ground_fb_arg = DeclareLaunchArgument('ground_feedback', default_value='true')
 
     rviz_config = (get_package_share_directory('spherical_robot_description') +
                    '/rviz/dual_lidar_calib.rviz')
@@ -65,6 +66,7 @@ def generate_launch_description():
     return LaunchDescription([
         rviz_arg,
         suspension_arg,
+        ground_fb_arg,
         # 0. World frame: 地面 z=0, base_link (球心) z=0.345 (球半径)
         Node(
             package='tf2_ros',
@@ -82,6 +84,7 @@ def generate_launch_description():
             executable='suspension_compensator.py',
             name='suspension_compensator',
             output='screen',
+            parameters=[{'ground_feedback': LaunchConfiguration('ground_feedback')}],
             condition=IfCondition(LaunchConfiguration('suspension')),
         ),
         # ④ Fusion — /merged_points (world), 地面 z=0
