@@ -58,8 +58,8 @@ def generate_launch_description():
         'use_sim_time', default_value='false',
         description='离线回放 bag 时置 true (配合 ros2 bag play --clock)')
 
-    config_path = '/home/wz/lidar_0804/src/rslidar_lio_adapter/config/fastlio_airy.yaml'
-    rviz_path = '/home/wz/lidar_0804/src/rslidar_lio_adapter/rviz/fastlio_a.rviz'
+    config_path = '/home/wz/lidar_ws_fastlio/src/rslidar_lio_adapter/config/fastlio_airy.yaml'
+    rviz_path = '/home/wz/lidar_ws_fastlio/src/rslidar_lio_adapter/rviz/fastlio_a.rviz'
 
     return LaunchDescription([
         rviz_arg,
@@ -77,11 +77,23 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('use_driver')),
             parameters=[{
                 'config_path': PythonExpression([
-                    "'/home/wz/lidar_0804/src/rslidar_sdk/config/config_airy_lio.yaml'"
+                    "'/home/wz/lidar_ws_fastlio/src/rslidar_sdk/config/config_airy_lio.yaml'"
                     " if 'false' == '",
                     LaunchConfiguration('dual_lidar'),
-                    "' else '/home/wz/lidar_0804/src/rslidar_sdk/config/config.yaml'",
+                    "' else '/home/wz/lidar_ws_fastlio/src/rslidar_sdk/config/config.yaml'",
                 ]),
+            }],
+        ),
+
+        # ①b XYZI -> XYZIRT 合成 (离线回放旧 bag 时用; 在线 XYZIRT 驱动可忽略)
+        Node(
+            package='rslidar_lio_adapter',
+            executable='xyzirt_synth_node.py',
+            name='xyzirt_synth_node',
+            output='screen',
+            parameters=[{
+                'cloud_in': '/rslidar_points_1',
+                'cloud_out': '/rslidar_points_1_xyzirt',
             }],
         ),
 
@@ -93,7 +105,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
-                'cloud_in': '/rslidar_points_1',
+                'cloud_in': '/rslidar_points_1_xyzirt',
                 'imu_in': '/rslidar_imu_data_1',
                 'cloud_out': '/fastlio/lidar_points',
                 'imu_out': '/fastlio/imu',
