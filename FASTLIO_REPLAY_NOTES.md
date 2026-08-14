@@ -31,6 +31,21 @@ IMU loopback, clearing buffers (previous: 1786694793... vs received: 1786692458.
 - 方案A 在实机上曾验收通过（运动往返），说明链路本身可行，本次回放差异大概率
   来自外参/重力对齐配置或回放时序。
 
+### 08-14 晚补充（已用当前标定核对）
+
+- base→rslidar_1、base→rslidar_1_imu、extrinsic_R 与当前 DIFOP/URDF **完全一致**
+  （逐项计算验证），外参没有过时；仅 rslidar_2 在 launch 里还是旧值（单 LIO 不用）；
+- 地图倾斜的真正原因：LIO 的 odom（camera_init）是 **IMU 初始朝向系**，
+  Airy IMU 与竖直方向差约 156°，而 world_anchor 假设 odom≈base 朝向（只补偿 -4°/2.4°），
+  所以整张地图倾斜、地面不在 z=0；
+- 尝试 `gravity_alignment.enable_gravity_alignment: true`：LIO 一直报
+  “Waiting for motion”，回放期间未完成对齐（且对齐前不发布 /cloud_registered）；
+- 下一步两个方向：
+  1. 调 gravity_alignment 阈值（acc_diff_thr / num_moving_frames_thr），
+     或让回放开头直接运动数秒；
+  2. 修 world_anchor：world→odom 旋转应取 base→rslidar_1_imu 的逆（把 IMU 初始系
+     转到 base/竖直系），z 用 odom_z_mean 校准——这能直接解决地图倾斜，不依赖 LIO 对齐。
+
 ## 下一步
 
 1. 核对 spark_fast_lio 配置中的 `extrinsic_R`（R_lidar2imu）与 launch 里

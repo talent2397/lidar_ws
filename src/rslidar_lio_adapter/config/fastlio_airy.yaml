@@ -53,9 +53,10 @@
       interval: 100               # 每 100 帧写一个 PCD (约 15s); 由 launch save_map:=true 开启
 
     gravity_alignment:
-      # 默认关闭: 静止启动时 odom 立即可用（地图=初始 base_link 系, 水平地面 z 轴垂直）。
-      # 若机器人初始姿态明显倾斜, 设 true 并让机器人运动数秒完成对齐。
-      enable_gravity_alignment: false
+      # 2026-08-14: 改为 true。Airy IMU 初始朝向与竖直差 ~156°,
+      # 关闭时地图 Z 轴随 IMU 初始系倾斜, 地面不在 z=0;
+      # 开启后需机器人运动数秒让 LIO 用加速度计收敛重力方向。
+      enable_gravity_alignment: true
       acc_diff_thr: 0.2
       num_moving_frames_thr: 20
       num_gravity_measurements_thr: 20
