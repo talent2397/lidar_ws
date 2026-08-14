@@ -13,6 +13,8 @@
 > 剩余偏差在 >1.5 rad/s 高速段，待逐点去畸变。
 > **08-14 下午录制确认（133832_r2）**：运动 Δz0 ±2.4cm、静止 ±0.5cm、
 > merged 穿透 0.23%、输出 19Hz，全转速 ≤3 rad/s 均 <3cm。
+> **融合节点 v2（去畸变 + 共面校正）**：最差帧穿透 7.56→3.45%、地面残差
+> max 3.46→2.91cm（113628 回放 A/B 对照），主要收益来自共面校正。
 
 ## 快速开始
 
@@ -35,6 +37,8 @@ python3 scripts/analyze_ground_misalign.py \
     --bag bags/dual_lidar_20260813_173447      # 两雷达逐帧地面平面偏差分析
 python3 scripts/analyze_ground_feedback.py \
     --bag bags/dual_lidar_20260813_171903      # 离线仿真地面平面慢速反馈收益
+python3 scripts/analyze_merged_planarity.py \
+    --bag <merged bag>                          # merged 地面穿透率与共面度
 ```
 
 ## 2026-08-13 离线标定脚本（只输出结果，不改运行时）
