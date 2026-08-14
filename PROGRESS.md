@@ -4,6 +4,23 @@
 > [PLAN_FASTLIO2_方案A.md](PLAN_FASTLIO2_方案A.md)；标定文档见 [CALIBRATION.md](CALIBRATION.md)；
 > 历史排查见 [记录.md](记录.md)。
 
+## 2026-08-14 晚：单 LIO 回放验证（当前标定，✅ 已跑通）
+
+- 用新录 XYZIRT bag（`fastlio_20260814_161821`，59s）离线回放方案A 单 LIO：
+  - **修复 IMU 乱序**：adapter 与 spark-fast-lio 的 IMU 话题全部改 **reliable**
+    （best_effort 在回放/负载下乱序 → `IMU loopback` 清缓冲、odom 出不来）；
+  - **修复坐标系**：实测 LIO 的 odom→base_link 初始为单位阵（odom=base 初始系），
+    world_anchor 保持“base 重力小角度旋转”，并在 odom 就绪后用均值 z 重发校准版；
+  - 验证结果（`/cloud_registered_base` + TF 链变换到 world）：
+    地面残差 std **1.57cm**（p95 2.11 / max 2.80cm）、穿透 **0.17%**
+    （max 5.35%，高速帧）；平面高度 **−4.6cm 固定偏移**，
+    属 `/cloud_registered_base` frame 与 base_link 的固定差，fusion 侧
+    `world_z_offset` 可吸收；
+  - `/cloud_registered`（odom 系）不能直接用于地面分析，后续双 LIO 融合
+    继续使用 `/cloud_registered_base`（与备份 launch 的 dual_lidar 设计一致）。
+- 已录制新 bag：`fastlio_20260814_172859`（待回放验证）。
+- 下一步：接第二路 LIO（rslidar_2 + IMU2）+ dual_lidar_fusion 双 LIO 验证。
+
 ## 2026-08-11 新增：lidar2 逐点补偿 + 双雷达融合 + BEV 视角（移除栅格建图）
 
 按用户要求：暂不继续 2D 占用栅格建图，先把手头数据处理好——
