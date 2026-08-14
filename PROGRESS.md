@@ -61,6 +61,11 @@
   **1.76cm（p95 2.03 / max 2.30cm）**，为目前最优；TF 级静止 Δz0 −0.7±0.3cm、
   运动 −0.2±3.5cm。剩余最差帧集中在静止/低速（t≈36s、61s，疑似场地地面特征），
   高速段已基本消除。
+- **FAST-LIO2（备份分支）08-14 回放验证**：单 LIO 已跑通——修复 IMU reliable
+  顺序问题（best_effort 乱序导致 loopback）与 world_anchor 坐标系（odom=base
+  初始系）后，`/cloud_registered_base` 地面残差 **1.57cm**、穿透 **0.17%**
+  （max 5.35% 高速帧），平面高 −4.6cm 固定偏移待 fusion `world_z_offset` 吸收；
+  代码/文档在分支 `backup_new_lio_webgl_20260811`（已推送），下一步双 LIO。
 
 ## 已修改 / 新增的文件（工作区即最新版）
 
