@@ -30,6 +30,11 @@
   （z ≤±21cm，roll/pitch ≤~2°/9°），说明当前问题主要是垂直平移残差，
   几何模型解释力弱（R²≈0.19），直接闭环更有效。v4 已实现并做离线回放接线验证，
   **待实机转弯 bag 复测**。
+- **08-14 晚：v6c 实机数据验证通过（目标 <5cm）**。新 bag 113628（IMU1 200Hz/
+  IMU2 180Hz）：0.3Hz 悬挂反相回弹是主要残余（两雷达各自 ±3.4cm、反相，corr −0.40）。
+  迭代：v4(τ=0.5) 运动 Δz0 ±8.2cm → v5(冻结z双积分) ±8.3cm → v6(拉长双积分) 饱和失败
+  → **v6c(τ=0.08 + 冻结z双积分) 运动 ±4.4cm、静止 ±1.2cm**，达到运动均值 <5cm 目标；
+  剩余偏差集中在 >1.5 rad/s（扫描畸变），下一步做逐点去畸变。
 
 ## 已修改 / 新增的文件（工作区即最新版）
 
@@ -43,7 +48,7 @@
 | `snapshots/2026-08-13_运动地面验证/` | 新建 | 运动地面验证版代码快照（只读备份） |
 | `src/spherical_robot_description/urdf/spherical_robot.urdf` | 已改 | v10 地面标定外参 |
 | `src/spherical_robot_description/launch/dual_lidar_fusion.launch.py` | 已改 | `suspension` 参数；融合节点指向 C++ |
-| `src/spherical_robot_description/scripts/suspension_compensator.py` | 已改 | v3 动态补偿 + IMU 缺帧容错 + **v4 地面平面慢速反馈（roll/pitch/z）** |
+| `src/spherical_robot_description/scripts/suspension_compensator.py` | 已改 | v3 动态补偿 + IMU 缺帧容错 + **v6c 地面反馈（τ=0.08s，反馈有效时冻结 z 双积分）** |
 | `scripts/analyze_ground_feedback.py` | 新建 | 离线仿真“地面平面慢速反馈”收益（修正前/后 Δz0/Δroll/Δpitch） |
 | `src/spherical_robot_description/src/point_cloud_fusion_node.cpp` | 新建 | C++ 融合节点（当前使用） |
 | `src/spherical_robot_description/scripts/point_cloud_fusion_py.py` | 保留 | Python 融合节点（参考，已弃用） |
@@ -113,10 +118,9 @@
 
 1. 【主路径】真实翻滚转弯复测：先排查/修复 IMU1 驱动输出，用最新补偿器（已含缺帧容错）
    重新录制“翻滚转弯”bag；以 171903 为参考基线，验收口径定为转弯运动段 Δz0 均值 <5cm；
-2. 【补偿器改造（进行中）】离线仿真表明几何模型对垂直残差解释力弱（R²≈0.19），
-   **地面平面慢速反馈更有效**：v4 已实现（每雷达点云拟合地面，τ=0.5s EMA 回灌
-   roll/pitch/z，launch 参数 `ground_feedback:=true` 默认开），待实机转弯复测；
-   若实机验证通过再决定 z 泄漏双积分是否保留为无地面时的兜底；
+2. 【补偿器改造（已完成 v6c）】113628 实机复测：运动段 Δz0 从 ±8.2cm 降到 **±4.4cm**、
+   静止 ±1.2cm，达到目标；反馈 τ=0.08s、反馈有效时冻结 z 泄漏双积分（双积分仅作
+   地面不可见兜底）。剩余 >1.5 rad/s 偏差属扫描畸变，下一步做逐点去畸变；
 3. 压左右 Y / yaw 残余（两雷达 TF 相对旋转约 3°）：用 `calibrate_planes_offline.py --dof lateral`
    配合 `140142_r2`、`150428_r2` 等障碍物 bag；
 4. 修 z 回弹静止饱和：静止时 z_disp 会冲到 +10~15cm（两雷达都有），建议静止时加快泄漏/收紧限幅；
@@ -140,9 +144,9 @@ python3 /home/wz/lidar_ws/scripts/analyze_ground_misalign.py --bag bags/<bag目�
   `world→base_link z=0.345`（= 球半径；2026-08-05 从错误的 0.395 修正）。
 - 补偿：`ACCEL_CORR_MAX_ANGLE_DEG=30`、`Z_MAX=0.15`、陀螺零偏 ~2.5s 收敛；
   z 泄漏双积分仅作为地面不可见时的惯性兜底，主补偿由地面平面反馈承担。
-- 地面反馈：`FB_TAU=0.5s`、`FB_Z_MAX=0.20m`、`FB_ANGLE_MAX_DEG=10°`、
-  launch 参数 `ground_feedback:=true`（默认开）；地面拟合门限：内点 ≥300、
-  法线竖直分量 ≥0.90。
+- 地面反馈（v6c）：`FB_TAU=0.08s`、`FB_Z_MAX=0.20m`、`FB_ANGLE_MAX_DEG=10°`、
+  `FB_VALID_WINDOW=1.0s`、launch 参数 `ground_feedback:=true`（默认开）；
+  地面拟合门限：内点 ≥300、法线竖直分量 ≥0.90；反馈有效时 z 双积分冻结。
 - 融合：`tf_lookup_offset=0.05s`、`sync_window=0.08s`、定时器 20ms、publisher reliable。
 - 录制：`record_bag.sh` 崩溃自动重试，残包进 `bags/_broken/`。
 - 可视化：Foxglove Studio 2.9.0（arm64，系统级 apt 安装），启动 `foxglove-studio`。
@@ -154,9 +158,8 @@ python3 /home/wz/lidar_ws/scripts/analyze_ground_misalign.py --bag bags/<bag目�
 - 左右 Y 方向仍有残余偏差；地面共面只能约束 roll/pitch/z，
   x/y/yaw 需要竖直面/ICP 继续标。
 - 测试地面必须水平；斜面会让点云相对平坦 grid 必然“穿透”。
-- **真实转弯（球体翻滚）时两雷达地面仍系统性错位**（171903 运动 Δz0 −15.8±8.5cm），
-  是当前主待办；173447 只验证了直线运动。**v4 地面反馈离线仿真可将其压到
-  −0.1±4.0cm，待实机复测确认。**
+- **真实转弯已实机验证到运动 Δz0 ±4.4cm（113628 + v6c）**；剩余 >1.5 rad/s
+  的 ±5~7cm 偏差来自扫描畸变，待逐点去畸变处理。
 - 录制端 IMU 丢包部分是 rosbag2 假象（开 RViz 时更严重），不影响补偿节点；
   但 IMU1 两包均仅 14~21Hz（IMU2 正常 202Hz），驱动/链路侧输出待查。
 - z 回弹静止时冲到 +10~15cm 限幅（两雷达都有，互相抵消影响较小）。
