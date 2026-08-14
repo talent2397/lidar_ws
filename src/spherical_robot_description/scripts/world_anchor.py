@@ -79,7 +79,8 @@ class WorldAnchor(Node):
 
         self.acc_buf = []
         self.odom_pos = []
-        self.done = False
+        self.published_fallback = False
+        self.published_calibrated = False
         self.start_time = self.get_clock().now()
         self.tf_broadcaster = StaticTransformBroadcaster(self)
         self.sub_imu = self.create_subscription(
@@ -89,33 +90,25 @@ class WorldAnchor(Node):
         self.timer = self.create_timer(1.0, self.try_publish)
 
     def imu_cb(self, msg):
-        if self.done or len(self.acc_buf) >= self.acc_samples:
+        if self.published_calibrated or len(self.acc_buf) >= self.acc_samples:
             return
         self.acc_buf.append((msg.linear_acceleration.x,
                              msg.linear_acceleration.y,
                              msg.linear_acceleration.z))
 
     def odom_cb(self, msg):
-        if self.done or len(self.odom_pos) >= self.odom_samples:
+        if self.published_calibrated or len(self.odom_pos) >= self.odom_samples:
             return
         p = msg.pose.pose.position
         self.odom_pos.append((p.x, p.y, p.z))
 
     def try_publish(self):
-        if self.done:
+        if self.published_calibrated:
             return
         if len(self.acc_buf) < 100:
             self.get_logger().info(
                 f"waiting IMU samples {len(self.acc_buf)}/100 ...")
             return
-        if len(self.odom_pos) < 100:
-            elapsed_ns = (self.get_clock().now() - self.start_time).nanoseconds
-            if elapsed_ns < 20.0 * 1e9:
-                self.get_logger().info(
-                    f"waiting odom samples {len(self.odom_pos)}/100 ...")
-                return
-            self.get_logger().warn(
-                "odom 未在 20s 内就绪, 先按 z 补偿=0 发布 world->odom")
         mean_acc = np.mean(np.array(self.acc_buf[:self.acc_samples]), axis=0)
         norm = float(np.linalg.norm(mean_acc))
         if abs(norm - 1.0) > 0.15:
@@ -124,13 +117,23 @@ class WorldAnchor(Node):
         # IMU 静止时读数 = -重力方向 (specific force), 故重力方向 = -mean_acc
         g_imu = -mean_acc / norm
         g_base = self.R_base_imu @ g_imu
-        # 实测 LIO 的 odom->base_link 初始为单位阵 => odom 初始系 = base 系,
-        # world->odom 旋转直接用 base 重力对齐 (roll/pitch), yaw 取 0
         R_world_odom = rot_align(g_base, np.array([0.0, 0.0, -1.0]))
+
+        odom_ready = len(self.odom_pos) >= 50
+        elapsed_ns = (self.get_clock().now() - self.start_time).nanoseconds
+        if not odom_ready:
+            if elapsed_ns < 20.0 * 1e9:
+                self.get_logger().info(
+                    f"waiting odom samples {len(self.odom_pos)}/50 ...")
+                return
+            if self.published_fallback:
+                return  # 回退版已发, 继续等 odom
+            self.get_logger().warn(
+                "odom 未在 20s 内就绪, 先按 z 补偿=0 发布回退 world->odom")
 
         # z 补偿: 用 odom->base 位置均值, 使 world->base z = base_z
         t_ob_mean = np.zeros(3)
-        if len(self.odom_pos) >= 50:
+        if odom_ready:
             t_ob_mean = np.mean(
                 np.array(self.odom_pos[-self.odom_samples:]), axis=0)
         t_wo_z = self.base_z - float((R_world_odom @ t_ob_mean)[2])
@@ -155,10 +158,14 @@ class WorldAnchor(Node):
         ts.transform.rotation.z = q[2]
         ts.transform.rotation.w = q[3]
         self.tf_broadcaster.sendTransform(ts)
-        self.done = True
-        # 发布完成后不再需要订阅, 释放以减少 CPU
-        self.destroy_subscription(self.sub_imu)
-        self.destroy_subscription(self.sub_odom)
+        if odom_ready:
+            self.published_calibrated = True
+            self.get_logger().info(
+                "world_anchor calibrated published, stopping")
+            self.destroy_subscription(self.sub_imu)
+            self.destroy_subscription(self.sub_odom)
+        else:
+            self.published_fallback = True
 
     @staticmethod
     def rpy_from_rot(R):

@@ -60,6 +60,18 @@ IMU loopback, clearing buffers (previous: 1786694793... vs received: 1786692458.
   z=0.345/odom_pos_mean=0）；待 odom 就绪后 z 校准可消除；
 - 下一步：修 world_anchor 等 odom 就绪再发布（而不是 20s 回退），然后接第二路 LIO。
 
+### 08-14 晚 world_anchor 修正后复测（单 LIO 达标）
+
+- world_anchor 改为：odom 就绪前可发回退版，odom 就绪（≥50 样本）后立即重发
+  **校准版**（z 用 odom_pos_mean 全向量公式），再停止；
+- 复测（161821 bag）：world→odom z=0.3461（odom 及时就绪，未走回退），
+  `/cloud_registered_base` + TF 链：
+  - 地面残差 std **1.57cm**（p95 2.11 / max 2.80cm），有效 541/541；
+  - 穿透 **0.17%**（max 5.35%，高速帧）；
+- 平面高度仍 **−4.6cm** 恒定偏移 → `/cloud_registered_base` 的实际 frame
+  （visualization_frame "base"）与 base_link 有固定 z 差；fusion 侧可用
+  `world_z_offset` 微调吸收（备份 launch 已预留该参数）。
+
 ## 下一步
 
 1. 核对 spark_fast_lio 配置中的 `extrinsic_R`（R_lidar2imu）与 launch 里
