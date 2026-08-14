@@ -85,17 +85,9 @@ def generate_launch_description():
             }],
         ),
 
-        # ①b XYZI -> XYZIRT 合成 (离线回放旧 bag 时用; 在线 XYZIRT 驱动可忽略)
-        Node(
-            package='rslidar_lio_adapter',
-            executable='xyzirt_synth_node.py',
-            name='xyzirt_synth_node',
-            output='screen',
-            parameters=[{
-                'cloud_in': '/rslidar_points_1',
-                'cloud_out': '/rslidar_points_1_xyzirt',
-            }],
-        ),
+        # ①b XYZI -> XYZIRT 合成 (仅回放旧 XYZI bag 时手动启用:
+        #     ros2 run rslidar_lio_adapter xyzirt_synth_node.py
+        #     并把 adapter cloud_in 改回 /rslidar_points_1_xyzirt)
 
         # ② Adapter: /rslidar_points_1 + IMU -> /fastlio/*
         Node(
@@ -105,7 +97,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
-                'cloud_in': '/rslidar_points_1_xyzirt',
+                'cloud_in': '/rslidar_points_1',
                 'imu_in': '/rslidar_imu_data_1',
                 'cloud_out': '/fastlio/lidar_points',
                 'imu_out': '/fastlio/imu',

@@ -13,7 +13,7 @@ import struct
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2, PointField
 
 
@@ -27,7 +27,8 @@ class XyzirtSynthNode(Node):
         self.cloud_out = self.get_parameter('cloud_out').value
         self.scan_duration = self.get_parameter('scan_duration').value
         self.sub = self.create_subscription(
-            PointCloud2, self.cloud_in, self.cb, qos_profile_sensor_data)
+            PointCloud2, self.cloud_in, self.cb,
+            QoSProfile(depth=100, reliability=ReliabilityPolicy.RELIABLE))
         self.pub = self.create_publisher(
             PointCloud2, self.cloud_out,
             QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE))

@@ -101,7 +101,9 @@ SPARKFastLIO2::SPARKFastLIO2(const rclcpp::NodeOptions &options)
       lidar_qos,
       std::bind(&SPARKFastLIO2::livoxLidarCallback, this, std::placeholders::_1));
 #endif
-  auto imu_qos = rclcpp::SensorDataQoS();
+  // IMU 必须 reliable: best_effort 在回放/负载下会乱序,
+  // 导致 "IMU loopback" 清缓冲 (2026-08-14 定位)
+  auto imu_qos = rclcpp::QoS(rclcpp::KeepLast(1000)).reliable().durability_volatile();
   sub_imu_ = create_subscription<sensor_msgs::msg::Imu>(
       "imu", imu_qos, std::bind(&SPARKFastLIO2::imuCallback, this, std::placeholders::_1));
 

@@ -58,8 +58,10 @@ public:
     imu_out_    = declare_parameter<std::string>("imu_out", "/fastlio/imu");
     keep_frame_ = declare_parameter<std::string>("frame_id", "");
 
+    // IMU 必须用 reliable 订阅: 录制端是 reliable 发布, best_effort 在负载下
+    // 会乱序, 导致 spark-fast-lio "IMU loopback" 清缓冲 (2026-08-14 定位)
     auto cloud_qos = rclcpp::QoS(rclcpp::KeepLast(10)).reliable().durability_volatile();
-    auto imu_qos   = rclcpp::SensorDataQoS();
+    auto imu_qos   = rclcpp::QoS(rclcpp::KeepLast(1000)).reliable().durability_volatile();
 
     sub_cloud_ = create_subscription<sensor_msgs::msg::PointCloud2>(
       cloud_in_, cloud_qos,
