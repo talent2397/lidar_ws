@@ -252,13 +252,16 @@ bash start_lidar.sh suspension:=true
   不依赖 tf2 的过去时刻查询；
 - 发布成功后清空缓存帧，避免重复发布。
 - **v2（2026-08-14）**：
-  - 逐点去畸变：Airy 为规则网格（height=96），按**列号**估算扫描时刻，对 21 个
+  - 逐点去畸变：Airy 输出 `height=900 × width=96`（行=方位角/时间，列=激光通道），
+    按**行号**估算扫描时刻，对 21 个
     时间 bin 做 TF 插值（四元数 slerp + 平移线性），消除 0.1s 扫描内的高速畸变；
   - 双雷达地面共面校正：对两片变换后的点云分别两遍最小二乘拟合地面
     （剔除 >5cm 深点异常），把 lidar2 的平面（roll/pitch/z）EMA 对齐到 lidar1，
     保证融合后底端共面；
+  - 深点畸变保护：剔除低于拟合地面平面 0.25m 的点（`outlier_filter` 默认开），
+    压掉高速翻滚时的穿地假点（离线：穿透 0.22→0.14%，最差帧 4.63→3.08%）；
   - 参数：`deskew:=true`、`plane_align:=true`（默认开）、`scan_duration=0.10`、
-    `plane_align_gain=0.30`、内点 ≥300。
+    `plane_align_gain=0.30`、`outlier_below=0.25`、内点 ≥300。
 - **C++ 化**：rclpy 给 `PointCloud2.data` 赋值约 163ns/字节（160k 点 ~400ms），
   Python 版无法实时；C++ 版单帧 <5ms（`src/point_cloud_fusion_node.cpp`）。
   Python 版保留为 `scripts/point_cloud_fusion_py.py`（参考用）。
@@ -280,7 +283,8 @@ bash start_lidar.sh suspension:=true
 | **去畸变 + 共面校正** | **0.53%** | **3.45%** | **2.91cm** |
 
 归因：共面校正贡献最大（最差帧穿透减半），去畸变单独仅改善尾部；均值残差 ~2.1cm
-接近单帧拟合噪声/扫描畸变地板。
+接近单帧拟合噪声/扫描畸变地板。v2.1 修复去畸变时间轴（行号）后均值进一步到 1.98cm；
+深点保护把最差帧穿透从 4.63% 压到 3.08%。
 
 ### 4.3 170307 实测发现与修正
 

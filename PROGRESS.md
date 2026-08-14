@@ -50,6 +50,12 @@
   穿透 **0.22%**（max 4.63%）、地面残差 **1.83cm（p95 2.30 / max 2.75cm）**，
   为目前最优；TF 级静止 Δz0 −0.6±0.3cm、运动 −0.1±2.9cm（含单帧 l1 拟合异常
   +19.3cm，其余 ≤8.7cm），IMU1 194Hz / IMU2 19Hz（录制端丢包）。
+- **08-14 晚：融合 v2.1（修复去畸变时间轴 + 深点保护）**。检查点云组织发现
+  Airy 输出是 **height=900（方位角/时间）× width=96（激光通道）**，时间沿行推进；
+  此前去畸变误用列号，等于时间映射错乱。改为按行号后 113628 回放：穿透
+  0.53→0.41%、地面残差 2.07→1.98cm。另加“深点畸变保护”（剔除低于地面平面
+  0.25m 的点，`outlier_filter` 默认开）：140619 离线验证穿透 0.22→0.14%、
+  最差帧 4.63→3.08%，每帧仅滤 ~0.13% 点。
 
 ## 已修改 / 新增的文件（工作区即最新版）
 
@@ -66,6 +72,7 @@
 | `src/spherical_robot_description/scripts/suspension_compensator.py` | 已改 | v3 动态补偿 + IMU 缺帧容错 + **v6c 地面反馈（τ=0.08s，反馈有效时冻结 z 双积分）** |
 | `scripts/analyze_ground_feedback.py` | 新建 | 离线仿真“地面平面慢速反馈”收益（修正前/后 Δz0/Δroll/Δpitch） |
 | `src/spherical_robot_description/src/point_cloud_fusion_node.cpp` | 已改 | **融合 v2：逐点去畸变（列号→TF 插值）+ 双雷达地面共面校正（参数 deskew/plane_align 默认开）** |
+| `src/spherical_robot_description/src/point_cloud_fusion_node.cpp` | 已改 | **融合 v2.1：去畸变时间轴改为行号（height=900=方位角/时间）；新增深点畸变保护（outlier_filter/outlier_below=0.25m 默认开）** |
 | `scripts/analyze_merged_planarity.py` | 新建 | 分析 merged 地面穿透率与共面度（拟合平面后的内点残差厚度） |
 | `src/spherical_robot_description/src/point_cloud_fusion_node.cpp` | 新建 | C++ 融合节点（当前使用） |
 | `src/spherical_robot_description/scripts/point_cloud_fusion_py.py` | 保留 | Python 融合节点（参考，已弃用） |
@@ -168,6 +175,8 @@ python3 /home/wz/lidar_ws/scripts/analyze_ground_misalign.py --bag bags/<bag目�
 - 融合 v2：`deskew:=true`（默认）、`plane_align:=true`（默认）、
   `scan_duration=0.10s`、`plane_align_gain=0.30`、拟合内点 ≥300（两遍最小二乘，
   剔除 >5cm 深点异常后再拟合）。
+- 融合 v2.1：去畸变按行号（`height=900` 时间轴）；`outlier_filter:=true`（默认）、
+  `outlier_below=0.25m`（低于地面平面该深度则剔除）。
 - 录制：`record_bag.sh` 崩溃自动重试，残包进 `bags/_broken/`。
 - 可视化：Foxglove Studio 2.9.0（arm64，系统级 apt 安装），启动 `foxglove-studio`。
 
