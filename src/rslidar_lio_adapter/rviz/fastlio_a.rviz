@@ -23,13 +23,6 @@ Visualization Manager:
       Style: Points
       Size (Pixels): 2
     - Class: rviz_default_plugins/PointCloud2
-      Name: LIO Registered Base (de-skewed)
-      Enabled: true
-      Topic:
-        Value: /cloud_registered_base
-      Style: Points
-      Size (Pixels): 2
-    - Class: rviz_default_plugins/PointCloud2
       Name: LiDAR2 Raw
       Enabled: true
       Topic:
