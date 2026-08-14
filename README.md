@@ -61,17 +61,21 @@ python3 scripts/calibrate_icp_offline.py \
 
 ## 可视化（Foxglove Studio）
 
-Foxglove Studio 2.9.0（arm64）已系统级安装：
+Foxglove Studio 2.9.0（arm64）已系统级安装。**Jetson 上必须加 `--disable-gpu`
+启动**（默认 GPU 进程初始化失败会导致窗口白屏/起不来）：
 
 ```bash
-foxglove-studio
+bash scripts/foxglove.sh
 ```
 
 如需在 Studio 里订阅 ROS2 话题，还需桥接节点：
 
 ```bash
-sudo apt install ros-humble-foxglove-bridge
+bash scripts/foxglove_bridge.sh      # WebSocket 监听 0.0.0.0:8765
 ```
+
+然后在 Foxglove 里连接 `ws://localhost:8765` 即可看到 /rslidar_points_*、
+/merged_points、/tf 等话题。
 
 ## 已知注意
 
