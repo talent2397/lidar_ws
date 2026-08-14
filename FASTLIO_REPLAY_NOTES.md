@@ -46,6 +46,20 @@ IMU loopback, clearing buffers (previous: 1786694793... vs received: 1786692458.
   2. 修 world_anchor：world→odom 旋转应取 base→rslidar_1_imu 的逆（把 IMU 初始系
      转到 base/竖直系），z 用 odom_z_mean 校准——这能直接解决地图倾斜，不依赖 LIO 对齐。
 
+### 08-14 晚验证结果（单 LIO 已跑通）
+
+- 实测 **odom→base_link 初始为单位阵**（不是 IMU 系）→ world_anchor 旋转保持
+  “base 重力对齐”（小角度）即可，之前尝试的 116° 旋转是错的（会让地图更歪）；
+- **用 `/cloud_registered_base`（base 系稠密点云）+ TF 链变换到 world 后**：
+  地面残差 std **1.57cm**（p95 2.09 / max 2.86cm）、穿透 **0.26%**（max 9.96%，
+  高速帧）——与当前 v6c+融合 v2.1（1.76cm / 0.12%）基本持平甚至略优；
+- `/cloud_registered`（odom 系）不能直接用（内部 map 帧 z 语义不同，平面拟合失败），
+  **后续双 LIO 融合应继续使用 `/cloud_registered_base`**（备份 launch 的 dual_lidar
+  融合本来就是这么接的）；
+- 平面高度 −4.6cm：因本次 world_anchor 又走了回退（odom 20s 内未就绪，
+  z=0.345/odom_pos_mean=0）；待 odom 就绪后 z 校准可消除；
+- 下一步：修 world_anchor 等 odom 就绪再发布（而不是 20s 回退），然后接第二路 LIO。
+
 ## 下一步
 
 1. 核对 spark_fast_lio 配置中的 `extrinsic_R`（R_lidar2imu）与 launch 里

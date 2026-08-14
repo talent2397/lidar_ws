@@ -78,7 +78,7 @@ class WorldAnchor(Node):
         self.R_base_imu = R_base_lidar @ R_lidar_imu
 
         self.acc_buf = []
-        self.odom_z = []
+        self.odom_pos = []
         self.done = False
         self.start_time = self.get_clock().now()
         self.tf_broadcaster = StaticTransformBroadcaster(self)
@@ -96,9 +96,10 @@ class WorldAnchor(Node):
                              msg.linear_acceleration.z))
 
     def odom_cb(self, msg):
-        if self.done or len(self.odom_z) >= self.odom_samples:
+        if self.done or len(self.odom_pos) >= self.odom_samples:
             return
-        self.odom_z.append(msg.pose.pose.position.z)
+        p = msg.pose.pose.position
+        self.odom_pos.append((p.x, p.y, p.z))
 
     def try_publish(self):
         if self.done:
@@ -107,11 +108,11 @@ class WorldAnchor(Node):
             self.get_logger().info(
                 f"waiting IMU samples {len(self.acc_buf)}/100 ...")
             return
-        if len(self.odom_z) < 100:
+        if len(self.odom_pos) < 100:
             elapsed_ns = (self.get_clock().now() - self.start_time).nanoseconds
             if elapsed_ns < 20.0 * 1e9:
                 self.get_logger().info(
-                    f"waiting odom samples {len(self.odom_z)}/100 ...")
+                    f"waiting odom samples {len(self.odom_pos)}/100 ...")
                 return
             self.get_logger().warn(
                 "odom 未在 20s 内就绪, 先按 z 补偿=0 发布 world->odom")
@@ -123,18 +124,24 @@ class WorldAnchor(Node):
         # IMU 静止时读数 = -重力方向 (specific force), 故重力方向 = -mean_acc
         g_imu = -mean_acc / norm
         g_base = self.R_base_imu @ g_imu
+        # 实测 LIO 的 odom->base_link 初始为单位阵 => odom 初始系 = base 系,
+        # world->odom 旋转直接用 base 重力对齐 (roll/pitch), yaw 取 0
         R_world_odom = rot_align(g_base, np.array([0.0, 0.0, -1.0]))
 
-        z_off = 0.0
-        if len(self.odom_z) >= 50:
-            z_off = float(np.mean(self.odom_z[-self.odom_samples:]))
+        # z 补偿: 用 odom->base 位置均值, 使 world->base z = base_z
+        t_ob_mean = np.zeros(3)
+        if len(self.odom_pos) >= 50:
+            t_ob_mean = np.mean(
+                np.array(self.odom_pos[-self.odom_samples:]), axis=0)
+        t_wo_z = self.base_z - float((R_world_odom @ t_ob_mean)[2])
         q = quat_from_rot(R_world_odom)
         rpy = self.rpy_from_rot(R_world_odom)
         self.get_logger().info(
-            f"publish world->odom: z={self.base_z - z_off:.4f} "
+            f"publish world->odom: z={t_wo_z:.4f} "
             f"rpy(deg)=({math.degrees(rpy[0]):.2f}, {math.degrees(rpy[1]):.2f}, "
             f"{math.degrees(rpy[2]):.2f}) |g_base|={norm:.3f} "
-            f"odom_z_mean={z_off:.4f}")
+            f"odom_pos_mean=({t_ob_mean[0]:.3f},{t_ob_mean[1]:.3f},"
+            f"{t_ob_mean[2]:.3f})")
 
         ts = TransformStamped()
         ts.header.stamp = self.get_clock().now().to_msg()
@@ -142,7 +149,7 @@ class WorldAnchor(Node):
         ts.child_frame_id = "odom"
         ts.transform.translation.x = 0.0
         ts.transform.translation.y = 0.0
-        ts.transform.translation.z = self.base_z - z_off
+        ts.transform.translation.z = t_wo_z
         ts.transform.rotation.x = q[0]
         ts.transform.rotation.y = q[1]
         ts.transform.rotation.z = q[2]
