@@ -222,8 +222,11 @@ bash start_lidar.sh suspension:=true
   双积分仅作地面不可见 >1s 时的兜底）；
 - 启动参数：`suspension:=true ground_feedback:=true`（默认开，可用
   `ground_feedback:=false` 关闭）；
-- 迭代：v4(τ=0.5) ±8.2cm → v5(冻结双积分) ±8.3cm → v6(拉长双积分) 饱和失败
-  → **v6c(τ=0.08 + 冻结双积分) ±4.4cm**。
+- 迭代与归因（同一 113628 bag 离线回放对照）：
+  v4(τ=0.5) ±8.2cm → v5(冻结双积分) ±8.3cm（无改善，双积分非主因）
+  → v6(拉长双积分 10/20s) 饱和失败 → v6b(τ=0.15) ±5.4cm（首次显著改善）
+  → **v6c(τ=0.08) ±4.4cm**；
+  **生效改动 = 加快地面反馈 τ（0.5→0.15→0.08s）**，冻结 z 双积分是配套防干扰。
 
 离线仿真结果（`scripts/analyze_ground_feedback.py`，τ=0.5s）：
 
